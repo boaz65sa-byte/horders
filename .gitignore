@@ -1,0 +1,11 @@
+# Local timestamped backups (not for deploy)
+*.bak-*
+
+# OS / editor cruft
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Node (for the upcoming push server)
+node_modules/
+.vercel
