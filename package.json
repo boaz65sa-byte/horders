@@ -1,0 +1,10 @@
+{
+  "name": "horders",
+  "version": "3.2.0",
+  "private": true,
+  "description": "Supplier ordering system with chef-approval flow and order-day push reminders",
+  "dependencies": {
+    "@vercel/kv": "^1.0.1",
+    "web-push": "^3.6.7"
+  }
+}

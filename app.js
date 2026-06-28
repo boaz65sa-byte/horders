@@ -1,4 +1,13 @@
 // ===========================
+// Web Push config
+// ===========================
+// Public VAPID key (safe to expose). The matching private key lives only in
+// the Vercel env var VAPID_PRIVATE_KEY. Real closed-app push also requires a
+// Vercel KV store — see SETUP_PUSH.md. If push isn't configured yet, the app
+// still works and falls back to the in-app reminder banner.
+const VAPID_PUBLIC_KEY = 'BJHKK8cXG8aunkKsJe8KyjR4xbgFkWJDVWWfwkc2wSnF01iLk-wHDob9APbY1YMAdh4m1iNDx31d9ns3bpA6Qxo';
+
+// ===========================
 // Authentication System
 // ===========================
 
@@ -341,6 +350,7 @@ class OrderSystem {
         this.updateApprovalsBadge();
         this.renderWeekdayPicker('supplier-order-days', []);
         this.checkOrderReminders();
+        this.setupPush();
     }
 
     // ===========================
@@ -642,6 +652,7 @@ class OrderSystem {
         document.getElementById('supplier-email').value = '';
         document.getElementById('supplier-category').value = '';
         this.renderWeekdayPicker('supplier-order-days', []);
+        this.refreshPushSchedule();
 
         this.showAlert('הספק נוסף בהצלחה! ✅', 'success');
     }
@@ -676,6 +687,7 @@ class OrderSystem {
         this.loadSupplierSelects();
         this.loadSuppliersDisplay();
         this.closeEditModal();
+        this.refreshPushSchedule();
 
         this.showAlert('הספק עודכן בהצלחה! ✅', 'success');
     }
@@ -696,6 +708,7 @@ class OrderSystem {
         this.loadSupplierSelects();
         this.loadSuppliersDisplay();
         this.renderAllProducts();
+        this.refreshPushSchedule();
 
         this.showAlert('הספק נמחק בהצלחה', 'success');
     }
@@ -1676,6 +1689,7 @@ class OrderSystem {
                 if (enableBtn) enableBtn.style.display = 'none';
                 this.showAlert('✅ ההתראות הופעלו', 'success');
                 this.checkOrderReminders();
+                this.setupPush(); // subscribe for real closed-app push (if configured)
             } else {
                 this.showAlert('ההתראות לא הופעלו', 'info');
             }
@@ -1687,6 +1701,63 @@ class OrderSystem {
         this.saveData('reminderDismissed', todayKey);
         const banner = document.getElementById('order-reminder-banner');
         if (banner) banner.style.display = 'none';
+    }
+
+    // ===========================
+    // Web Push (real closed-app notifications via the server)
+    // ===========================
+
+    async setupPush() {
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+        if (!VAPID_PUBLIC_KEY) return;
+        try {
+            const reg = await navigator.serviceWorker.register('/sw.js');
+            // Only subscribe once the user has granted notification permission
+            if (!('Notification' in window) || Notification.permission !== 'granted') return;
+
+            const ready = await navigator.serviceWorker.ready;
+            const sub = (await ready.pushManager.getSubscription()) ||
+                (await ready.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: this.urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+                }));
+            await this.syncPushSubscription(sub);
+        } catch (e) {
+            // Push not configured / unsupported — silently fall back to the in-app banner
+        }
+    }
+
+    // Re-send the current per-supplier schedule to the server (after schedule changes)
+    syncPushSubscription(subscription) {
+        const schedule = this.suppliers
+            .filter(s => Array.isArray(s.orderDays) && s.orderDays.length)
+            .map(s => ({ name: s.name, orderDays: s.orderDays }));
+        return fetch('/api/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ subscription, schedule })
+        }).catch(() => { /* ignore network/availability errors */ });
+    }
+
+    // Push schedule update without forcing a (re)subscribe — used after supplier edits
+    refreshPushSchedule() {
+        if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) {
+            // No active SW yet; setupPush will handle it on next permission grant/load
+            return;
+        }
+        navigator.serviceWorker.ready
+            .then(reg => reg.pushManager.getSubscription())
+            .then(sub => { if (sub) this.syncPushSubscription(sub); })
+            .catch(() => {});
+    }
+
+    urlBase64ToUint8Array(base64String) {
+        const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+        const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const raw = atob(base64);
+        const output = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) output[i] = raw.charCodeAt(i);
+        return output;
     }
 
     // ===========================
