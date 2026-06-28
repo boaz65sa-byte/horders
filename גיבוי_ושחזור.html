@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔒 גיבוי ושחזור - נקודת שמירה</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            direction: rtl;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .section {
+            padding: 30px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .section:last-child {
+            border-bottom: none;
+        }
+
+        .section h2 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 22px;
+        }
+
+        .section h3 {
+            color: #555;
+            margin: 20px 0 10px 0;
+            font-size: 18px;
+        }
+
+        .info-box {
+            background: #e3f2fd;
+            border-right: 4px solid #2196F3;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+
+        .success-box {
+            background: #e8f5e9;
+            border-right: 4px solid #4CAF50;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+
+        .warning-box {
+            background: #fff3cd;
+            border-right: 4px solid #ff9800;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+
+        .error-box {
+            background: #ffebee;
+            border-right: 4px solid #f44336;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+
+        .btn {
+            padding: 14px 24px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            width: 100%;
+            margin: 10px 0;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(76, 175, 80, 0.4);
+        }
+
+        .btn-secondary {
+            background: #2196F3;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #1976D2;
+            transform: translateY(-2px);
+        }
+
+        .btn-danger {
+            background: #f44336;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #da190b;
+            transform: translateY(-2px);
+        }
+
+        .backup-info {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+
+        .backup-info p {
+            margin: 8px 0;
+            color: #555;
+        }
+
+        .backup-info strong {
+            color: #333;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .file-label {
+            display: inline-block;
+            padding: 14px 24px;
+            background: #2196F3;
+            color: white;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            text-align: center;
+            transition: all 0.3s;
+            width: 100%;
+            margin: 10px 0;
+        }
+
+        .file-label:hover {
+            background: #1976D2;
+            transform: translateY(-2px);
+        }
+
+        .data-preview {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 8px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            margin: 15px 0;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .stat-box {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 36px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+
+        .stat-label {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .copyright {
+            text-align: center;
+            padding: 20px;
+            background: #f5f5f5;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .copyright strong {
+            color: #333;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                border-radius: 0;
+            }
+            
+            .section {
+                padding: 20px;
+            }
+
+            .stats {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔒 גיבוי ושחזור מערכת</h1>
+            <p class="subtitle">נקודת שמירה - שמור את כל הנתונים ושחזר בקלות</p>
+        </header>
+
+        <!-- Current Status -->
+        <div class="section">
+            <h2>📊 מצב נוכחי של המערכת</h2>
+            <div class="stats" id="current-stats">
+                <div class="stat-box">
+                    <div class="stat-label">ספקים</div>
+                    <div class="stat-number" id="suppliers-count">0</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">מוצרים</div>
+                    <div class="stat-number" id="products-count">0</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">הזמנות בהיסטוריה</div>
+                    <div class="stat-number" id="history-count">0</div>
+                </div>
+            </div>
+
+            <div class="backup-info" id="current-info">
+                <p><strong>📅 נתונים נוכחיים:</strong></p>
+                <p id="backup-date">טוען...</p>
+            </div>
+        </div>
+
+        <!-- Create Backup -->
+        <div class="section">
+            <h2>💾 יצירת גיבוי (נקודת שמירה)</h2>
+            
+            <div class="info-box">
+                <strong>💡 מה זה עושה?</strong>
+                <p>שומר את כל הנתונים שלך לקובץ: ספקים, מוצרים, הזמנות, הגדרות, קודים וזכויות יוצרים.</p>
+            </div>
+
+            <button class="btn btn-primary" onclick="createBackup()">
+                💾 צור נקודת שמירה עכשיו
+            </button>
+
+            <div id="backup-success" style="display: none;"></div>
+        </div>
+
+        <!-- Restore Backup -->
+        <div class="section">
+            <h2>📥 שחזור מגיבוי (נקודת שמירה)</h2>
+            
+            <div class="warning-box">
+                <strong>⚠️ שים לב!</strong>
+                <p>שחזור יחליף את כל הנתונים הנוכחיים בנתונים מהקובץ. מומלץ ליצור גיבוי לפני שחזור.</p>
+            </div>
+
+            <input type="file" id="restore-file" class="file-input" accept=".json" onchange="handleRestoreFile(event)">
+            <label for="restore-file" class="file-label">
+                📂 בחר קובץ גיבוי לשחזור
+            </label>
+
+            <div id="restore-preview" style="display: none;">
+                <h3>תצוגה מקדימה של הגיבוי:</h3>
+                <div class="backup-info" id="restore-info"></div>
+                <button class="btn btn-primary" onclick="confirmRestore()">
+                    ✅ אשר שחזור
+                </button>
+                <button class="btn btn-danger" onclick="cancelRestore()">
+                    ❌ בטל
+                </button>
+            </div>
+
+            <div id="restore-success" style="display: none;"></div>
+        </div>
+
+        <!-- View Backup Data -->
+        <div class="section">
+            <h2>👁️ צפייה בנתונים הנוכחיים</h2>
+            
+            <button class="btn btn-secondary" onclick="viewCurrentData()">
+                🔍 הצג את כל הנתונים
+            </button>
+
+            <div id="data-view" style="display: none;">
+                <h3>נתונים שמורים במערכת:</h3>
+                <div class="data-preview" id="data-content"></div>
+            </div>
+        </div>
+
+        <!-- Export/Import Individual Items -->
+        <div class="section">
+            <h2>📦 ייצוא/ייבוא פרטים ספציפיים</h2>
+            
+            <h3>ייצוא:</h3>
+            <button class="btn btn-secondary" onclick="exportSuppliers()">
+                📤 ייצא רק ספקים
+            </button>
+            <button class="btn btn-secondary" onclick="exportProducts()">
+                📤 ייצא רק מוצרים
+            </button>
+            <button class="btn btn-secondary" onclick="exportHistory()">
+                📤 ייצא רק היסטוריה
+            </button>
+
+            <h3>ייבוא:</h3>
+            <div class="info-box">
+                <strong>💡 טיפ:</strong>
+                <p>ייבוא יוסיף את הנתונים לנתונים הקיימים (לא מחליף).</p>
+            </div>
+
+            <input type="file" id="import-file" class="file-input" accept=".json" onchange="handleImportFile(event)">
+            <label for="import-file" class="file-label">
+                📥 ייבא נתונים ספציפיים
+            </label>
+        </div>
+
+        <!-- Auto Backup Settings -->
+        <div class="section">
+            <h2>⚙️ הגדרות גיבוי אוטומטי</h2>
+            
+            <div class="info-box">
+                <strong>🔔 תזכורת:</strong>
+                <p>מומלץ ליצור גיבוי לפחות פעם בשבוע או אחרי שינויים חשובים.</p>
+            </div>
+
+            <div class="backup-info">
+                <p><strong>📅 גיבוי אחרון:</strong> <span id="last-backup">לא נוצר עדיין</span></p>
+                <p><strong>⏰ זמן מאז גיבוי אחרון:</strong> <span id="time-since-backup">-</span></p>
+            </div>
+
+            <button class="btn btn-primary" onclick="setBackupReminder()">
+                🔔 הגדר תזכורת לגיבוי
+            </button>
+        </div>
+
+        <div class="copyright">
+            <p><strong>© כל הזכויות שמורות</strong></p>
+            <p><strong>בועז סעדה - פתרונות יצירתיים</strong></p>
+            <p>גרסה 3.1 | דצמבר 2024</p>
+        </div>
+    </div>
+
+    <script>
+        // Global variable to store backup data for restore
+        let pendingRestoreData = null;
+
+        // Load current stats on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            loadCurrentStats();
+            updateLastBackupInfo();
+        });
+
+        function loadCurrentStats() {
+            const suppliers = JSON.parse(localStorage.getItem('suppliers') || '[]');
+            const products = JSON.parse(localStorage.getItem('products') || '[]');
+            const history = JSON.parse(localStorage.getItem('history') || '[]');
+
+            document.getElementById('suppliers-count').textContent = suppliers.length;
+            document.getElementById('products-count').textContent = products.length;
+            document.getElementById('history-count').textContent = history.length;
+
+            const now = new Date().toLocaleString('he-IL');
+            document.getElementById('backup-date').innerHTML = `
+                <strong>ספקים:</strong> ${suppliers.length} | 
+                <strong>מוצרים:</strong> ${products.length} | 
+                <strong>הזמנות:</strong> ${history.length}<br>
+                <strong>נכון לתאריך:</strong> ${now}
+            `;
+        }
+
+        function createBackup() {
+            const backupData = {
+                version: '3.1',
+                timestamp: new Date().toISOString(),
+                date: new Date().toLocaleString('he-IL'),
+                copyright: 'בועז סעדה - פתרונות יצירתיים',
+                data: {
+                    suppliers: localStorage.getItem('suppliers'),
+                    products: localStorage.getItem('products'),
+                    history: localStorage.getItem('history'),
+                    preferences: localStorage.getItem('preferences'),
+                    adminCode: localStorage.getItem('adminCode'),
+                    employeeCode: localStorage.getItem('employeeCode'),
+                    ownerName: localStorage.getItem('ownerName')
+                }
+            };
+
+            const dataStr = JSON.stringify(backupData, null, 2);
+            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+            
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+            const filename = `backup-orders-${timestamp}.json`;
+            
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(dataBlob);
+            link.download = filename;
+            link.click();
+
+            // Save last backup time
+            localStorage.setItem('lastBackupTime', new Date().toISOString());
+            updateLastBackupInfo();
+
+            const successDiv = document.getElementById('backup-success');
+            successDiv.className = 'success-box';
+            successDiv.innerHTML = `
+                <strong>✅ גיבוי נוצר בהצלחה!</strong>
+                <p>הקובץ הורד: <strong>${filename}</strong></p>
+                <p>שמור את הקובץ במקום בטוח!</p>
+            `;
+            successDiv.style.display = 'block';
+
+            setTimeout(() => {
+                successDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        function handleRestoreFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const backupData = JSON.parse(e.target.result);
+                    
+                    if (!backupData.version || !backupData.data) {
+                        alert('❌ קובץ לא תקין! זה לא קובץ גיבוי של המערכת.');
+                        return;
+                    }
+
+                    pendingRestoreData = backupData;
+                    
+                    // Show preview
+                    const suppliers = JSON.parse(backupData.data.suppliers || '[]');
+                    const products = JSON.parse(backupData.data.products || '[]');
+                    const history = JSON.parse(backupData.data.history || '[]');
+
+                    const restoreInfo = document.getElementById('restore-info');
+                    restoreInfo.innerHTML = `
+                        <p><strong>📅 תאריך גיבוי:</strong> ${backupData.date}</p>
+                        <p><strong>🔖 גרסה:</strong> ${backupData.version}</p>
+                        <p><strong>👤 בעלים:</strong> ${backupData.copyright}</p>
+                        <hr style="margin: 10px 0;">
+                        <p><strong>📊 מה יש בגיבוי:</strong></p>
+                        <p>• ספקים: ${suppliers.length}</p>
+                        <p>• מוצרים: ${products.length}</p>
+                        <p>• הזמנות: ${history.length}</p>
+                        <hr style="margin: 10px 0;">
+                        <p style="color: #ff9800;"><strong>⚠️ פעולה זו תחליף את כל הנתונים הנוכחיים!</strong></p>
+                    `;
+
+                    document.getElementById('restore-preview').style.display = 'block';
+                } catch (error) {
+                    alert('❌ שגיאה בקריאת הקובץ: ' + error.message);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function confirmRestore() {
+            if (!pendingRestoreData) return;
+
+            if (!confirm('האם אתה בטוח? פעולה זו תחליף את כל הנתונים הנוכחיים!')) {
+                return;
+            }
+
+            try {
+                // Restore all data
+                Object.keys(pendingRestoreData.data).forEach(key => {
+                    if (pendingRestoreData.data[key]) {
+                        localStorage.setItem(key, pendingRestoreData.data[key]);
+                    }
+                });
+
+                const successDiv = document.getElementById('restore-success');
+                successDiv.className = 'success-box';
+                successDiv.innerHTML = `
+                    <strong>✅ שחזור הושלם בהצלחה!</strong>
+                    <p>כל הנתונים שוחזרו מהגיבוי.</p>
+                    <p><strong>רענן את הדף כדי לראות את השינויים.</strong></p>
+                `;
+                successDiv.style.display = 'block';
+
+                document.getElementById('restore-preview').style.display = 'none';
+                pendingRestoreData = null;
+
+                // Reload stats
+                loadCurrentStats();
+
+                // Auto reload after 3 seconds
+                setTimeout(() => {
+                    if (confirm('רוצה לרענן את הדף עכשיו?')) {
+                        location.reload();
+                    }
+                }, 2000);
+            } catch (error) {
+                alert('❌ שגיאה בשחזור: ' + error.message);
+            }
+        }
+
+        function cancelRestore() {
+            document.getElementById('restore-preview').style.display = 'none';
+            document.getElementById('restore-file').value = '';
+            pendingRestoreData = null;
+        }
+
+        function viewCurrentData() {
+            const dataView = document.getElementById('data-view');
+            const dataContent = document.getElementById('data-content');
+
+            const allData = {
+                suppliers: localStorage.getItem('suppliers'),
+                products: localStorage.getItem('products'),
+                history: localStorage.getItem('history'),
+                preferences: localStorage.getItem('preferences'),
+                adminCode: '*** מוסתר ***',
+                employeeCode: '*** מוסתר ***',
+                ownerName: localStorage.getItem('ownerName')
+            };
+
+            dataContent.textContent = JSON.stringify(allData, null, 2);
+            dataView.style.display = dataView.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function exportSuppliers() {
+            const suppliers = localStorage.getItem('suppliers');
+            downloadJSON({ suppliers: suppliers }, 'suppliers-export.json');
+        }
+
+        function exportProducts() {
+            const products = localStorage.getItem('products');
+            downloadJSON({ products: products }, 'products-export.json');
+        }
+
+        function exportHistory() {
+            const history = localStorage.getItem('history');
+            downloadJSON({ history: history }, 'history-export.json');
+        }
+
+        function downloadJSON(data, filename) {
+            const dataStr = JSON.stringify(data, null, 2);
+            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(dataBlob);
+            link.download = filename;
+            link.click();
+            alert('✅ הקובץ הורד: ' + filename);
+        }
+
+        function handleImportFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const importData = JSON.parse(e.target.result);
+                    
+                    let imported = [];
+                    Object.keys(importData).forEach(key => {
+                        if (importData[key]) {
+                            // Merge with existing data
+                            const existing = JSON.parse(localStorage.getItem(key) || '[]');
+                            const newData = JSON.parse(importData[key]);
+                            const merged = [...existing, ...newData];
+                            localStorage.setItem(key, JSON.stringify(merged));
+                            imported.push(key);
+                        }
+                    });
+
+                    alert('✅ ייבוא הושלם!\nיובאו: ' + imported.join(', '));
+                    loadCurrentStats();
+                } catch (error) {
+                    alert('❌ שגיאה בייבוא: ' + error.message);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function updateLastBackupInfo() {
+            const lastBackup = localStorage.getItem('lastBackupTime');
+            const lastBackupEl = document.getElementById('last-backup');
+            const timeSinceEl = document.getElementById('time-since-backup');
+
+            if (!lastBackup) {
+                lastBackupEl.textContent = 'לא נוצר עדיין';
+                timeSinceEl.textContent = '-';
+                return;
+            }
+
+            const backupDate = new Date(lastBackup);
+            lastBackupEl.textContent = backupDate.toLocaleString('he-IL');
+
+            const now = new Date();
+            const diff = now - backupDate;
+            const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+            const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+
+            if (days > 0) {
+                timeSinceEl.textContent = `${days} ימים ${hours} שעות`;
+                if (days > 7) {
+                    timeSinceEl.style.color = '#f44336';
+                    timeSinceEl.innerHTML += ' <strong>(מומלץ לגבות!)</strong>';
+                }
+            } else if (hours > 0) {
+                timeSinceEl.textContent = `${hours} שעות`;
+            } else {
+                timeSinceEl.textContent = 'פחות משעה';
+            }
+        }
+
+        function setBackupReminder() {
+            alert('💡 תזכורת הוגדרה!\n\nמומלץ ליצור גיבוי:\n• פעם בשבוע\n• אחרי שינויים חשובים\n• לפני עדכונים\n\nשמור את קובץ הגיבוי:\n• במחשב\n• בענן (Google Drive, Dropbox)\n• בכונן חיצוני');
+        }
+    </script>
+</body>
+</html>

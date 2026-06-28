@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>מערכת הזמנות ספקים</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="manifest" href="manifest.json">
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+    <!-- Login Screen -->
+    <div id="login-screen" class="login-screen">
+        <div class="login-container">
+            <div class="login-header">
+                <h1>🛒 מערכת הזמנות ספקים</h1>
+                <p class="login-subtitle">מערכת ניהול הזמנות מתקדמת</p>
+            </div>
+            
+            <div class="login-box">
+                <h2>🔐 כניסה למערכת</h2>
+                <p class="login-info">הזן קוד כניסה (מנהל או עובד)</p>
+                
+                <input type="password" id="login-code" class="login-input" placeholder="הזן קוד כניסה" maxlength="6">
+                <button id="login-btn" class="btn btn-primary">🔓 כניסה</button>
+                
+                <div id="login-error" class="login-error" style="display: none;">
+                    ❌ קוד שגוי! נסה שוב
+                </div>
+            </div>
+            
+            <div class="copyright">
+                <p>© כל הזכויות שמורות</p>
+                <p class="owner-name">בועז סעדה - פתרונות יצירתיים</p>
+                <p class="version">גרסה 3.1 | דצמבר 2024</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="container" id="main-app" style="display: none;">
+        <!-- Header -->
+        <header>
+            <div class="header-content">
+                <div class="header-title">
+                    <h1>🛒 מערכת הזמנות</h1>
+                    <p class="subtitle">ניהול הזמנות חכם לספקים</p>
+                </div>
+                <div class="header-actions">
+                    <span class="user-role" id="user-role-badge"></span>
+                    <button id="logout-btn" class="btn btn-small btn-secondary">🚪 יציאה</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Tabs Navigation -->
+        <nav class="tabs">
+            <button class="tab-btn active" data-tab="order">🛍️ הזמנה</button>
+            <button class="tab-btn" data-tab="products">📦 מוצרים</button>
+            <button class="tab-btn" data-tab="suppliers">👥 ספקים</button>
+            <button class="tab-btn" data-tab="history">📋 היסטוריה</button>
+            <button class="tab-btn" data-tab="settings" id="settings-tab-btn" style="display: none;">⚙️ הגדרות</button>
+        </nav>
+
+        <!-- Tab Contents -->
+        <div class="tab-content active" id="order-tab">
+            <!-- Supplier Selection -->
+            <div class="section">
+                <label for="supplier-select">בחר ספק:</label>
+                <select id="supplier-select" class="input-field">
+                    <option value="">-- בחר ספק --</option>
+                </select>
+            </div>
+
+            <!-- Delivery Date -->
+            <div class="section" id="delivery-date-section" style="display: none;">
+                <label for="delivery-date">📅 תאריך אספקה מבוקש:</label>
+                <input type="date" id="delivery-date" class="input-field">
+            </div>
+
+            <!-- Products List -->
+            <div id="products-list" class="products-list"></div>
+
+            <!-- Shipping Settings -->
+            <div class="section" id="shipping-settings" style="display: none;">
+                <h3>הגדרות שליחה:</h3>
+                
+                <div class="shipping-options">
+                    <label class="radio-label">
+                        <input type="radio" name="send-method" value="whatsapp" checked>
+                        <span>📱 WhatsApp</span>
+                    </label>
+                    <label class="radio-label">
+                        <input type="radio" name="send-method" value="email">
+                        <span>📧 Email</span>
+                    </label>
+                    <label class="radio-label">
+                        <input type="radio" name="send-method" value="both">
+                        <span>📱📧 שניהם</span>
+                    </label>
+                </div>
+
+                <div class="checkbox-wrapper">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="show-prices" checked>
+                        <span>☑️ הצג מחירים בהודעה</span>
+                    </label>
+                </div>
+
+                <div class="order-summary" id="order-summary"></div>
+
+                <button id="send-order-btn" class="btn btn-primary">📱 שלח הזמנה</button>
+                <button id="clear-order-btn" class="btn btn-secondary">🗑️ נקה הזמנה</button>
+            </div>
+        </div>
+
+        <!-- Products Tab -->
+        <div class="tab-content" id="products-tab">
+            <div class="section">
+                <h2>📦 ניהול מוצרים</h2>
+                
+                <!-- Excel Import Section -->
+                <div class="excel-import-section">
+                    <h3>📂 ייבוא מוצרים מאקסל</h3>
+                    <p class="help-text">העלה קובץ Excel/CSV עם המוצרים. הפורמט: שם מוצר | מחיר | יחידה</p>
+                    
+                    <label for="excel-supplier-select">בחר ספק לייבוא:</label>
+                    <select id="excel-supplier-select" class="input-field">
+                        <option value="">-- בחר ספק --</option>
+                    </select>
+
+                    <div class="file-upload">
+                        <input type="file" id="excel-file" accept=".xlsx,.xls,.csv" class="file-input">
+                        <label for="excel-file" class="file-label">📄 בחר קובץ Excel/CSV</label>
+                        <span id="file-name" class="file-name"></span>
+                    </div>
+
+                    <div id="excel-preview" class="excel-preview" style="display: none;">
+                        <h4>תצוגה מקדימה:</h4>
+                        <div id="preview-content"></div>
+                        <button id="import-products-btn" class="btn btn-primary">⬆️ ייבא מוצרים</button>
+                    </div>
+                </div>
+
+                <hr style="margin: 30px 0;">
+
+                <!-- Manual Add Product -->
+                <div class="add-product-section">
+                    <h3>➕ הוסף מוצר ידנית</h3>
+                    
+                    <label for="product-supplier-select">בחר ספק:</label>
+                    <select id="product-supplier-select" class="input-field">
+                        <option value="">-- בחר ספק --</option>
+                    </select>
+
+                    <label for="product-name">שם המוצר:</label>
+                    <input type="text" id="product-name" class="input-field" placeholder="לדוגמה: חסה">
+
+                    <label for="product-price">מחיר:</label>
+                    <input type="number" id="product-price" class="input-field" placeholder="לדוגמה: 8" step="0.01">
+
+                    <label for="product-unit">יחידה:</label>
+                    <select id="product-unit" class="input-field">
+                        <option value="ק״ג">ק״ג</option>
+                        <option value="יחידה">יחידה</option>
+                        <option value="ארגז">ארגז</option>
+                        <option value="קרטון">קרטון</option>
+                    </select>
+
+                    <button id="add-product-btn" class="btn btn-primary">➕ הוסף מוצר</button>
+                </div>
+
+                <!-- Products List -->
+                <div class="products-management">
+                    <h3>רשימת מוצרים</h3>
+                    <div id="all-products-list"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Suppliers Tab -->
+        <div class="tab-content" id="suppliers-tab">
+            <div class="section">
+                <h2>👥 ניהול ספקים</h2>
+                
+                <!-- Add Supplier -->
+                <div class="add-supplier-section">
+                    <h3>➕ הוסף ספק חדש</h3>
+                    
+                    <label for="supplier-name">שם הספק:</label>
+                    <input type="text" id="supplier-name" class="input-field" placeholder="לדוגמה: ירקות ופירות">
+
+                    <label for="supplier-phone">טלפון (WhatsApp):</label>
+                    <input type="tel" id="supplier-phone" class="input-field" placeholder="לדוגמה: 052-1234567">
+
+                    <label for="supplier-email">אימייל:</label>
+                    <input type="email" id="supplier-email" class="input-field" placeholder="לדוגמה: supplier@example.com">
+
+                    <label for="supplier-category">קטגוריה:</label>
+                    <input type="text" id="supplier-category" class="input-field" placeholder="לדוגמה: ירקות">
+
+                    <button id="add-supplier-btn" class="btn btn-primary">➕ הוסף ספק</button>
+                </div>
+
+                <!-- Suppliers List -->
+                <div class="suppliers-list">
+                    <h3>רשימת ספקים</h3>
+                    <div id="suppliers-display"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- History Tab -->
+        <div class="tab-content" id="history-tab">
+            <div class="section">
+                <h2>📋 היסטוריית הזמנות</h2>
+                <button id="clear-history-btn" class="btn btn-secondary">🗑️ נקה היסטוריה</button>
+                <div id="history-list"></div>
+            </div>
+        </div>
+
+        <!-- Settings Tab (Admin Only) -->
+        <div class="tab-content" id="settings-tab">
+            <div class="section">
+                <h2>⚙️ הגדרות מערכת</h2>
+                <p class="admin-note">🔐 אזור מנהל בלבד</p>
+                
+                <!-- Change Employee Code -->
+                <div class="settings-section">
+                    <h3>🔑 שינוי קוד עובד</h3>
+                    <p class="help-text">קוד העובד הנוכחי מוסתר מסיבות אבטחה</p>
+                    
+                    <label for="new-employee-code">קוד עובד חדש (6 ספרות):</label>
+                    <input type="password" id="new-employee-code" class="input-field" placeholder="הזן 6 ספרות" maxlength="6" pattern="[0-9]{6}">
+                    
+                    <label for="confirm-employee-code">אימות קוד עובד:</label>
+                    <input type="password" id="confirm-employee-code" class="input-field" placeholder="הזן שוב את הקוד" maxlength="6" pattern="[0-9]{6}">
+                    
+                    <button id="change-employee-code-btn" class="btn btn-primary">💾 שמור קוד חדש</button>
+                </div>
+
+                <hr style="margin: 30px 0;">
+
+                <!-- Change Admin Code -->
+                <div class="settings-section">
+                    <h3>🔐 שינוי קוד מנהל</h3>
+                    <p class="help-text danger-text">⚠️ שים לב! שינוי קוד המנהל ידרוש כניסה מחדש</p>
+                    
+                    <label for="current-admin-code">קוד מנהל נוכחי:</label>
+                    <input type="password" id="current-admin-code" class="input-field" placeholder="הזן קוד נוכחי" maxlength="6" pattern="[0-9]{6}">
+                    
+                    <label for="new-admin-code">קוד מנהל חדש (6 ספרות):</label>
+                    <input type="password" id="new-admin-code" class="input-field" placeholder="הזן 6 ספרות" maxlength="6" pattern="[0-9]{6}">
+                    
+                    <label for="confirm-admin-code">אימות קוד מנהל:</label>
+                    <input type="password" id="confirm-admin-code" class="input-field" placeholder="הזן שוב את הקוד" maxlength="6" pattern="[0-9]{6}">
+                    
+                    <button id="change-admin-code-btn" class="btn btn-primary">💾 שמור קוד חדש</button>
+                </div>
+
+                <hr style="margin: 30px 0;">
+
+                <!-- System Info -->
+                <div class="settings-section">
+                    <h3>ℹ️ מידע על המערכת</h3>
+                    <div class="system-info">
+                        <p><strong>גרסה:</strong> 3.0</p>
+                        <p><strong>תאריך עדכון:</strong> דצמבר 2024</p>
+                        <p><strong>זכויות יוצרים:</strong> © כל הזכויות שמורות</p>
+                        <p><strong>בעלים:</strong> <span id="owner-name-display">שם בעל הזכויות</span></p>
+                    </div>
+                    
+                    <label for="owner-name-input">עדכון שם בעל הזכויות:</label>
+                    <input type="text" id="owner-name-input" class="input-field" placeholder="הזן את שמך">
+                    <button id="update-owner-name-btn" class="btn btn-primary">💾 עדכן שם</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Supplier Modal -->
+    <div id="edit-supplier-modal" class="modal">
+        <div class="modal-content">
+            <h2>✏️ עריכת ספק</h2>
+            <input type="hidden" id="edit-supplier-id">
+            
+            <label for="edit-supplier-name">שם הספק:</label>
+            <input type="text" id="edit-supplier-name" class="input-field">
+
+            <label for="edit-supplier-phone">טלפון (WhatsApp):</label>
+            <input type="tel" id="edit-supplier-phone" class="input-field">
+
+            <label for="edit-supplier-email">אימייל:</label>
+            <input type="email" id="edit-supplier-email" class="input-field">
+
+            <label for="edit-supplier-category">קטגוריה:</label>
+            <input type="text" id="edit-supplier-category" class="input-field">
+
+            <div class="modal-actions">
+                <button id="save-supplier-btn" class="btn btn-primary">💾 שמור שינויים</button>
+                <button id="cancel-edit-btn" class="btn btn-secondary">❌ ביטול</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>בדיקת כניסה</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f0f0f0;
+        }
+        .test-box {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            max-width: 500px;
+            margin: 20px auto;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <div class="test-box">
+        <h1>🔍 בדיקת מערכת כניסה</h1>
+        
+        <h3>קודי ברירת מחדל:</h3>
+        <p><strong>מנהל:</strong> 123456</p>
+        <p><strong>עובד:</strong> 654321</p>
+        
+        <hr>
+        
+        <h3>בדיקות:</h3>
+        <button onclick="testLocalStorage()">בדוק localStorage</button>
+        <button onclick="clearAll()">נקה הכל</button>
+        <button onclick="checkCodes()">בדוק קודים</button>
+        
+        <div id="results"></div>
+    </div>
+
+    <script>
+        function testLocalStorage() {
+            const results = document.getElementById('results');
+            try {
+                localStorage.setItem('test', 'value');
+                const val = localStorage.getItem('test');
+                localStorage.removeItem('test');
+                results.innerHTML = '<p class="success">✅ localStorage עובד תקין!</p>';
+            } catch (e) {
+                results.innerHTML = '<p class="error">❌ בעיה ב-localStorage: ' + e.message + '</p>';
+            }
+        }
+
+        function clearAll() {
+            localStorage.removeItem('adminCode');
+            localStorage.removeItem('employeeCode');
+            localStorage.removeItem('currentUser');
+            document.getElementById('results').innerHTML = '<p class="success">✅ כל הנתונים נוקו! הקודים חזרו לברירת מחדל.</p>';
+        }
+
+        function checkCodes() {
+            const adminCode = localStorage.getItem('adminCode');
+            const employeeCode = localStorage.getItem('employeeCode');
+            const currentUser = localStorage.getItem('currentUser');
+            
+            let html = '<h4>נתונים ב-localStorage:</h4>';
+            html += '<p><strong>קוד מנהל:</strong> ' + (adminCode || 'לא הוגדר (ברירת מחדל: 123456)') + '</p>';
+            html += '<p><strong>קוד עובד:</strong> ' + (employeeCode || 'לא הוגדר (ברירת מחדל: 654321)') + '</p>';
+            html += '<p><strong>משתמש מחובר:</strong> ' + (currentUser || 'אין') + '</p>';
+            
+            document.getElementById('results').innerHTML = html;
+        }
+
+        // Run automatic test on load
+        window.onload = () => {
+            testLocalStorage();
+        };
+    </script>
+</body>
+</html>
