@@ -684,3 +684,383 @@ label {
 .system-info strong {
     color: #333;
 }
+
+/* Tab Badge (pending approvals count) */
+.tab-badge {
+    display: inline-block;
+    background: #f44336;
+    color: white;
+    font-size: 11px;
+    font-weight: 700;
+    min-width: 18px;
+    height: 18px;
+    line-height: 18px;
+    border-radius: 9px;
+    padding: 0 5px;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+
+/* Manual Item (ad-hoc) in order */
+.manual-item-section {
+    background: #fffbf0;
+    padding: 20px;
+    border-radius: 10px;
+    border: 2px dashed #FF9800;
+}
+
+.manual-items-list {
+    margin-top: 12px;
+}
+
+.manual-item-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    background: #fff;
+    border: 1px solid #ffe0b2;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+}
+
+.manual-item-text {
+    font-size: 14px;
+    color: #333;
+    font-weight: 600;
+}
+
+.manual-item-row .btn-small {
+    width: auto;
+    margin: 0;
+    padding: 6px 12px;
+}
+
+/* Products management list (grouped by supplier) */
+.product-group {
+    margin-bottom: 20px;
+}
+
+.product-group-title {
+    color: #FF9800;
+    font-size: 16px;
+    margin-bottom: 8px;
+    padding-bottom: 5px;
+    border-bottom: 2px solid #ffe0b2;
+}
+
+.product-group-count {
+    color: #999;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+.managed-product {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #f9f9f9;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 6px;
+}
+
+.managed-product-name {
+    flex: 1;
+    font-weight: 600;
+    color: #333;
+}
+
+.managed-product-price {
+    color: #4CAF50;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.managed-product .btn-small {
+    width: auto;
+    margin: 0;
+    padding: 6px 10px;
+}
+
+/* Approvals (Chef) */
+.approval-item-card {
+    background: #f5f5f5;
+    padding: 15px;
+    border-radius: 10px;
+    margin-bottom: 15px;
+    border-right: 4px solid #FF9800;
+}
+
+.approval-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+
+.approval-meta {
+    font-size: 13px;
+    color: #777;
+    margin-bottom: 10px;
+}
+
+.approval-items {
+    background: white;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+}
+
+.approval-item {
+    font-size: 14px;
+    color: #444;
+    margin: 4px 0;
+}
+
+.approval-total {
+    font-weight: 700;
+    font-size: 16px;
+    color: #2e7d32;
+    margin-bottom: 12px;
+}
+
+.approval-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.approval-actions .btn {
+    flex: 1;
+    width: auto;
+    margin: 0;
+}
+
+/* Supermarket-style product cards (order screen) */
+.product-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
+    margin-top: 20px;
+}
+
+.product-card {
+    background: #fff;
+    border: 1px solid #eee;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    display: flex;
+    flex-direction: column;
+}
+
+.product-card.filtered-out {
+    display: none;
+}
+
+.product-card.selected {
+    border: 2px solid #4CAF50;
+    box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.25);
+}
+
+.product-card.selected .product-card-name::before {
+    content: '✔ ';
+    color: #4CAF50;
+}
+
+.product-card-img {
+    height: 110px;
+    background-size: cover;
+    background-position: center;
+    background-color: #eef2f6;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    position: relative;
+}
+
+.product-card-img.no-img {
+    border-bottom: 2px dashed #cfd8dc;
+}
+
+.img-placeholder {
+    color: #90a4ae;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+    line-height: 1.5;
+}
+
+.img-edit-btn {
+    position: absolute;
+    bottom: 6px;
+    left: 6px;
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.55);
+    color: #fff;
+    font-size: 15px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.product-card-body {
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.product-card-name {
+    font-weight: 700;
+    color: #333;
+    font-size: 14px;
+}
+
+.product-card-price {
+    color: #4CAF50;
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.qty-stepper {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.qty-btn {
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    border: none;
+    border-radius: 8px;
+    background: #4CAF50;
+    color: #fff;
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.qty-btn:active {
+    transform: scale(0.93);
+}
+
+.qty-stepper .quantity-input {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    text-align: center;
+    padding: 7px 4px;
+    border: 2px solid #ddd;
+    border-radius: 6px;
+    font-size: 16px;
+}
+
+.product-card .unit-select {
+    width: 100%;
+}
+
+/* Weekday picker (supplier order days) */
+.weekday-picker {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+}
+
+.weekday-btn {
+    width: 40px;
+    height: 40px;
+    border: 2px solid #ddd;
+    border-radius: 50%;
+    background: #fff;
+    color: #666;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+
+.weekday-btn.on {
+    background: #4CAF50;
+    border-color: #4CAF50;
+    color: #fff;
+}
+
+/* Order-day reminder banner */
+.reminder-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);
+    color: #fff;
+    padding: 12px 16px;
+    flex-wrap: wrap;
+}
+
+.reminder-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 200px;
+}
+
+.reminder-icon {
+    font-size: 20px;
+}
+
+.reminder-text {
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.reminder-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.reminder-enable-btn {
+    width: auto;
+    margin: 0;
+    background: rgba(255,255,255,0.95);
+    color: #E65100;
+    white-space: nowrap;
+}
+
+.reminder-dismiss-btn {
+    width: auto;
+    margin: 0;
+    background: rgba(0,0,0,0.2);
+    color: #fff;
+    padding: 8px 12px;
+}
+
+/* Thumbnail in products-management list */
+.managed-product-thumb {
+    width: 42px;
+    height: 42px;
+    flex-shrink: 0;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
+    background-color: #eef2f6;
+    background-size: cover;
+    background-position: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 16px;
+}

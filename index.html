@@ -54,11 +54,24 @@
             </div>
         </header>
 
+        <!-- Order-day reminder banner -->
+        <div id="order-reminder-banner" class="reminder-banner" style="display: none;">
+            <div class="reminder-content">
+                <span class="reminder-icon">🔔</span>
+                <span id="reminder-text" class="reminder-text"></span>
+            </div>
+            <div class="reminder-actions">
+                <button id="enable-notifications-btn" class="btn btn-small reminder-enable-btn">🔔 הפעל התראות</button>
+                <button id="dismiss-reminder-btn" class="btn btn-small reminder-dismiss-btn">✖</button>
+            </div>
+        </div>
+
         <!-- Tabs Navigation -->
         <nav class="tabs">
             <button class="tab-btn active" data-tab="order">🛍️ הזמנה</button>
             <button class="tab-btn" data-tab="products">📦 מוצרים</button>
             <button class="tab-btn" data-tab="suppliers">👥 ספקים</button>
+            <button class="tab-btn" data-tab="approvals" id="approvals-tab-btn" style="display: none;">✅ אישורים<span id="approvals-badge" class="tab-badge" style="display: none;">0</span></button>
             <button class="tab-btn" data-tab="history">📋 היסטוריה</button>
             <button class="tab-btn" data-tab="settings" id="settings-tab-btn" style="display: none;">⚙️ הגדרות</button>
         </nav>
@@ -79,8 +92,33 @@
                 <input type="date" id="delivery-date" class="input-field">
             </div>
 
+            <!-- Product Search -->
+            <div class="section" id="product-search-section" style="display: none;">
+                <input type="text" id="product-search" class="input-field" placeholder="🔍 חיפוש מוצר..." autocomplete="off">
+                <div id="search-empty" class="alert alert-info" style="display: none;">לא נמצאו מוצרים תואמים</div>
+            </div>
+
             <!-- Products List -->
             <div id="products-list" class="products-list"></div>
+
+            <!-- Manual Item (ad-hoc, not in catalog) -->
+            <div class="section manual-item-section" id="manual-item-section" style="display: none;">
+                <h3>➕ הוסף פריט ידני להזמנה</h3>
+                <p class="help-text">פריט חד-פעמי שלא נמצא בקטלוג (לא נשמר כמוצר קבוע)</p>
+                <div class="manual-item-form">
+                    <input type="text" id="manual-item-name" class="input-field" placeholder="שם פריט">
+                    <input type="number" id="manual-item-qty" class="input-field" placeholder="כמות" min="0" step="0.5">
+                    <select id="manual-item-unit" class="input-field">
+                        <option value="ק״ג">ק״ג</option>
+                        <option value="יחידה">יחידה</option>
+                        <option value="ארגז">ארגז</option>
+                        <option value="קרטון">קרטון</option>
+                    </select>
+                    <input type="number" id="manual-item-price" class="input-field" placeholder="מחיר (אופציונלי)" min="0" step="0.01">
+                    <button id="add-manual-item-btn" class="btn btn-primary">➕ הוסף להזמנה</button>
+                </div>
+                <div id="manual-items-list" class="manual-items-list"></div>
+            </div>
 
             <!-- Shipping Settings -->
             <div class="section" id="shipping-settings" style="display: none;">
@@ -110,7 +148,7 @@
 
                 <div class="order-summary" id="order-summary"></div>
 
-                <button id="send-order-btn" class="btn btn-primary">📱 שלח הזמנה</button>
+                <button id="send-order-btn" class="btn btn-primary">📤 שלח לאישור השף</button>
                 <button id="clear-order-btn" class="btn btn-secondary">🗑️ נקה הזמנה</button>
             </div>
         </div>
@@ -200,6 +238,9 @@
                     <label for="supplier-category">קטגוריה:</label>
                     <input type="text" id="supplier-category" class="input-field" placeholder="לדוגמה: ירקות">
 
+                    <label>📅 ימי הזמנה (לתזכורת):</label>
+                    <div id="supplier-order-days" class="weekday-picker"></div>
+
                     <button id="add-supplier-btn" class="btn btn-primary">➕ הוסף ספק</button>
                 </div>
 
@@ -217,6 +258,15 @@
                 <h2>📋 היסטוריית הזמנות</h2>
                 <button id="clear-history-btn" class="btn btn-secondary">🗑️ נקה היסטוריה</button>
                 <div id="history-list"></div>
+            </div>
+        </div>
+
+        <!-- Approvals Tab (Chef / Admin Only) -->
+        <div class="tab-content" id="approvals-tab">
+            <div class="section">
+                <h2>✅ אישור הזמנות</h2>
+                <p class="admin-note">🔐 הזמנות הממתינות לאישור השף</p>
+                <div id="approvals-list"></div>
             </div>
         </div>
 
@@ -261,6 +311,25 @@
 
                 <hr style="margin: 30px 0;">
 
+                <!-- Approval Flow Phone Numbers -->
+                <div class="settings-section">
+                    <h3>📞 מספרי טלפון לזרימת אישור</h3>
+                    <p class="help-text">מספרי WhatsApp עבור שלב האישור. פורמט: 052-1234567</p>
+
+                    <label for="chef-phone-input">📱 WhatsApp של השף (מקבל הזמנות לאישור):</label>
+                    <input type="tel" id="chef-phone-input" class="input-field" placeholder="לדוגמה: 052-1234567">
+
+                    <label for="manager-phone-input">📱 WhatsApp של מנהל ההזמנות (מקבל הזמנות מאושרות):</label>
+                    <input type="tel" id="manager-phone-input" class="input-field" placeholder="לדוגמה: 052-7654321">
+
+                    <label for="procurement-email-input">📧 מייל רכש (העתק/CC בכל הזמנה שנשלחת במייל):</label>
+                    <input type="email" id="procurement-email-input" class="input-field" placeholder="לדוגמה: rechesh@example.com">
+
+                    <button id="save-approval-phones-btn" class="btn btn-primary">💾 שמור הגדרות</button>
+                </div>
+
+                <hr style="margin: 30px 0;">
+
                 <!-- System Info -->
                 <div class="settings-section">
                     <h3>ℹ️ מידע על המערכת</h3>
@@ -297,12 +366,18 @@
             <label for="edit-supplier-category">קטגוריה:</label>
             <input type="text" id="edit-supplier-category" class="input-field">
 
+            <label>📅 ימי הזמנה (לתזכורת):</label>
+            <div id="edit-supplier-order-days" class="weekday-picker"></div>
+
             <div class="modal-actions">
                 <button id="save-supplier-btn" class="btn btn-primary">💾 שמור שינויים</button>
                 <button id="cancel-edit-btn" class="btn btn-secondary">❌ ביטול</button>
             </div>
         </div>
     </div>
+
+    <!-- Shared hidden input for product image upload (camera/gallery on mobile) -->
+    <input type="file" id="product-image-input" accept="image/*" capture="environment" style="display: none;">
 
     <script src="app.js"></script>
 </body>
