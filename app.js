@@ -140,6 +140,23 @@ const PRODUCT_CATALOG = [
 ];
 
 // ===========================
+// Staff (named identities picked at login)
+// ===========================
+const DEFAULT_STAFF = ['שף ראשי', 'סגן שף', 'שף חלבי', 'שף בשרי', 'עובד מטבח'];
+
+// Reads the staff list from localStorage, or returns sensible defaults (not persisted)
+function loadStaff() {
+    try {
+        const s = JSON.parse(localStorage.getItem('staff'));
+        if (Array.isArray(s) && s.length) return s;
+    } catch (_) { /* ignore */ }
+    return DEFAULT_STAFF.map((n, i) => ({ id: String(i + 1), name: n }));
+}
+
+// Keys mirrored to the shared (KV) bank across devices
+const SHARED_KEYS = ['products', 'suppliers', 'staff', 'pendingOrders', 'history'];
+
+// ===========================
 // Authentication System
 // ===========================
 
@@ -221,18 +238,25 @@ class AuthSystem {
         }
 
         const code = codeInput.value.trim();
+        const nameSelect = document.getElementById('login-name');
+        const name = nameSelect ? nameSelect.value.trim() : '';
 
         if (code.length !== 6 || !/^\d+$/.test(code)) {
             this.showError('הקוד חייב להיות 6 ספרות');
             return;
         }
 
+        if (!name) {
+            this.showError('בחר מי אתה');
+            return;
+        }
+
         if (code === this.adminCode) {
-            this.currentUser = { role: 'admin', code: code };
+            this.currentUser = { role: 'admin', code: code, name: name };
             this.saveData('currentUser', this.currentUser);
             this.showApp();
         } else if (code === this.employeeCode) {
-            this.currentUser = { role: 'employee', code: code };
+            this.currentUser = { role: 'employee', code: code, name: name };
             this.saveData('currentUser', this.currentUser);
             this.showApp();
         } else {
@@ -261,6 +285,23 @@ class AuthSystem {
         document.getElementById('main-app').style.display = 'none';
         document.getElementById('login-code').value = '';
         document.getElementById('login-error').style.display = 'none';
+        this.populateLoginNames();
+    }
+
+    // Fill the "who are you" dropdown from the staff list
+    populateLoginNames() {
+        const select = document.getElementById('login-name');
+        if (!select) return;
+        const prev = select.value;
+        const staff = loadStaff();
+        select.innerHTML = '<option value="">-- בחר מי אתה --</option>';
+        staff.forEach(member => {
+            const opt = document.createElement('option');
+            opt.value = member.name;
+            opt.textContent = member.name;
+            select.appendChild(opt);
+        });
+        if (prev) select.value = prev;
     }
 
     showApp() {
@@ -278,7 +319,8 @@ class AuthSystem {
 
             if (roleBadge && this.currentUser) {
                 const isAdmin = this.currentUser.role === 'admin';
-                roleBadge.textContent = isAdmin ? '👑 מנהל' : '👤 עובד';
+                const roleLabel = isAdmin ? '👑 מנהל' : '👤 עובד';
+                roleBadge.textContent = this.currentUser.name ? `${this.currentUser.name} · ${roleLabel}` : roleLabel;
                 // Settings + Approvals (chef) tabs are admin-only
                 if (settingsTab) settingsTab.style.display = isAdmin ? 'block' : 'none';
                 if (approvalsTab) approvalsTab.style.display = isAdmin ? 'block' : 'none';
@@ -450,6 +492,7 @@ class OrderSystem {
         this.products = this.loadData('products') || this.getDefaultProducts();
         this.history = this.loadData('history') || [];
         this.pendingOrders = this.loadData('pendingOrders') || [];
+        this.staff = this.loadData('staff') || loadStaff();
         this.approvalSettings = this.loadData('approvalSettings') || {
             chefPhone: '',
             managerPhone: '',
@@ -483,6 +526,9 @@ class OrderSystem {
         }
         this.autoFillImages(true); // fill missing product images from the web (silent)
         this.renderAllProducts();
+        // Persist default staff on first run so it syncs to other devices
+        if (!this.loadData('staff')) this.saveData('staff', this.staff);
+        this.renderStaff();
         this.loadHistory();
         this.loadPreferences();
         this.loadApprovalSettings();
@@ -531,8 +577,8 @@ class OrderSystem {
 
     saveData(key, data) {
         localStorage.setItem(key, JSON.stringify(data));
-        // Mirror product/supplier changes to the shared (KV) bank when active
-        if (key === 'products' || key === 'suppliers') this.scheduleSharedSave();
+        // Mirror shared keys (products/suppliers/staff/orders/history) to the KV bank
+        if (SHARED_KEYS.includes(key)) this.scheduleSharedSave();
     }
 
     // localStorage-only write (used when adopting server data, to avoid an echo POST)
@@ -556,27 +602,43 @@ class OrderSystem {
             const data = await r.json();
             this.sharedBankActive = true;
 
-            if (Array.isArray(data.products) && data.products.length) {
-                // Adopt the shared bank as the source of truth
-                this.products = data.products;
-                this.saveLocal('products', this.products);
-                if (Array.isArray(data.suppliers) && data.suppliers.length) {
-                    this.suppliers = data.suppliers;
-                    this.saveLocal('suppliers', this.suppliers);
+            // Adopt whichever shared collections the server already has (server = source of truth)
+            SHARED_KEYS.forEach(k => {
+                if (Array.isArray(data[k])) {
+                    this[k] = data[k];
+                    this.saveLocal(k, data[k]);
                 }
-                // Re-render everything with the shared data
-                this.loadSupplierSelects();
-                this.loadSuppliersDisplay();
-                this.renderAllProducts();
-                const sid = document.getElementById('supplier-select').value;
-                if (sid) this.loadProducts(sid);
-            } else {
-                // Shared bank is empty → seed it from this device
-                this.saveSharedBank();
+            });
+            this.rerenderAll();
+
+            // Seed only the collections the server doesn't have yet (don't clobber existing)
+            const missing = SHARED_KEYS.filter(k => !Array.isArray(data[k]));
+            if (missing.length) {
+                const payload = {};
+                missing.forEach(k => { payload[k] = this[k]; });
+                fetch('/api/data', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                }).catch(() => {});
             }
         } catch (e) {
             // Offline or no server → localStorage only
         }
+    }
+
+    // Re-render all views after adopting shared data
+    rerenderAll() {
+        this.loadSupplierSelects();
+        this.loadSuppliersDisplay();
+        this.renderAllProducts();
+        this.renderStaff();
+        this.loadHistory();
+        this.renderApprovals();
+        this.updateApprovalsBadge();
+        if (typeof authSystem !== 'undefined' && authSystem) authSystem.populateLoginNames();
+        const sid = document.getElementById('supplier-select').value;
+        if (sid) this.loadProducts(sid);
     }
 
     scheduleSharedSave() {
@@ -587,11 +649,29 @@ class OrderSystem {
 
     saveSharedBank() {
         if (!this.sharedBankActive) return;
+        const payload = {};
+        SHARED_KEYS.forEach(k => { payload[k] = this[k]; });
         fetch('/api/data', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ products: this.products, suppliers: this.suppliers })
+            body: JSON.stringify(payload)
         }).catch(() => { /* ignore transient errors */ });
+    }
+
+    // Pull the latest pending orders from the shared bank (used when opening Approvals)
+    async refreshPendingFromServer() {
+        if (!this.sharedBankActive) return;
+        try {
+            const r = await fetch('/api/data');
+            if (!r.ok) return;
+            const data = await r.json();
+            if (Array.isArray(data.pendingOrders)) {
+                this.pendingOrders = data.pendingOrders;
+                this.saveLocal('pendingOrders', this.pendingOrders);
+                this.renderApprovals();
+                this.updateApprovalsBadge();
+            }
+        } catch (e) { /* ignore */ }
     }
 
     // ===========================
@@ -654,6 +734,9 @@ class OrderSystem {
 
         const seedCatalogBtn = document.getElementById('seed-catalog-btn');
         if (seedCatalogBtn) seedCatalogBtn.addEventListener('click', () => this.seedCatalog(false));
+
+        const addStaffBtn = document.getElementById('add-staff-btn');
+        if (addStaffBtn) addStaffBtn.addEventListener('click', () => this.addStaff());
         
         // Excel import
         const excelFile = document.getElementById('excel-file');
@@ -698,7 +781,10 @@ class OrderSystem {
         document.getElementById(`${tabName}-tab`).classList.add('active');
 
         // Refresh dynamic tabs on entry
-        if (tabName === 'approvals') this.renderApprovals();
+        if (tabName === 'approvals') {
+            this.renderApprovals();
+            this.refreshPendingFromServer(); // pull latest pending orders from other devices
+        }
         if (tabName === 'products') this.renderAllProducts();
     }
 
@@ -1082,6 +1168,51 @@ class OrderSystem {
             );
         }
         return added;
+    }
+
+    // ===========================
+    // Staff management
+    // ===========================
+
+    renderStaff() {
+        const container = document.getElementById('staff-list');
+        if (!container) return;
+        if (!this.staff.length) {
+            container.innerHTML = '<p class="alert alert-info">אין אנשי צוות</p>';
+            return;
+        }
+        container.innerHTML = '';
+        this.staff.forEach(member => {
+            const row = document.createElement('div');
+            row.className = 'managed-product';
+            row.innerHTML = `
+                <span class="managed-product-name">👤 ${member.name}</span>
+                <button class="btn btn-secondary btn-small" onclick="orderSystem.deleteStaff('${member.id}')">🗑️</button>
+            `;
+            container.appendChild(row);
+        });
+    }
+
+    addStaff() {
+        const input = document.getElementById('staff-name-input');
+        const name = input.value.trim();
+        if (!name) { alert('נא להזין שם/תפקיד'); return; }
+
+        this.staff.push({ id: Date.now().toString(), name });
+        this.saveData('staff', this.staff);
+        input.value = '';
+        this.renderStaff();
+        if (typeof authSystem !== 'undefined' && authSystem) authSystem.populateLoginNames();
+        this.showAlert('✅ נוסף לצוות', 'success');
+    }
+
+    deleteStaff(id) {
+        if (!confirm('למחוק איש צוות זה?')) return;
+        this.staff = this.staff.filter(s => s.id !== id);
+        this.saveData('staff', this.staff);
+        this.renderStaff();
+        if (typeof authSystem !== 'undefined' && authSystem) authSystem.populateLoginNames();
+        this.showAlert('נמחק מהצוות', 'success');
     }
 
     // ===========================
@@ -1684,6 +1815,7 @@ class OrderSystem {
             sendMethod: this.preferences.sendMethod,
             showedPrices: this.preferences.showPrices,
             createdBy: (typeof authSystem !== 'undefined' && authSystem.currentUser) ? authSystem.currentUser.role : 'unknown',
+            createdByName: (typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.name) ? authSystem.currentUser.name : '',
             status: 'pending'
         };
 
@@ -1745,6 +1877,8 @@ class OrderSystem {
             deliveryDate: order.deliveryDate,
             sendMethod: order.sendMethod,
             showedPrices: order.showedPrices,
+            createdByName: order.createdByName || '',
+            approvedByName: (typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.name) ? authSystem.currentUser.name : '',
             approved: true
         });
         this.saveData('history', this.history);
@@ -1831,7 +1965,8 @@ class OrderSystem {
             const dateStr = date.toLocaleDateString('he-IL');
             const timeStr = date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
             const deliveryStr = order.deliveryDate ? new Date(order.deliveryDate).toLocaleDateString('he-IL') : '—';
-            const createdByName = order.createdBy === 'admin' ? 'מנהל' : (order.createdBy === 'employee' ? 'עובד' : 'לא ידוע');
+            const roleLabel = order.createdBy === 'admin' ? 'מנהל' : (order.createdBy === 'employee' ? 'עובד' : 'לא ידוע');
+            const createdByName = order.createdByName ? `${order.createdByName} (${roleLabel})` : roleLabel;
 
             let itemsHtml = '';
             order.items.forEach(item => {
@@ -1946,7 +2081,7 @@ class OrderSystem {
                 if (enableBtn) enableBtn.style.display = 'none';
                 this.showAlert('✅ ההתראות הופעלו', 'success');
                 this.checkOrderReminders();
-                this.setupPush(); // subscribe for real closed-app push (if configured)
+                this.setupPush(true); // subscribe for real closed-app push, with on-screen feedback
             } else {
                 this.showAlert('ההתראות לא הופעלו', 'info');
             }
@@ -1964,13 +2099,20 @@ class OrderSystem {
     // Web Push (real closed-app notifications via the server)
     // ===========================
 
-    async setupPush() {
-        if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    // report=true → show on-screen messages (used when the user taps "הפעל התראות")
+    async setupPush(report) {
+        if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+            if (report) this.showAlert('המכשיר/דפדפן לא תומך בהתראות. באייפון: הוסף את האתר למסך הבית ופתח משם.', 'error');
+            return;
+        }
         if (!VAPID_PUBLIC_KEY) return;
         try {
-            const reg = await navigator.serviceWorker.register('/sw.js');
+            await navigator.serviceWorker.register('/sw.js');
             // Only subscribe once the user has granted notification permission
-            if (!('Notification' in window) || Notification.permission !== 'granted') return;
+            if (Notification.permission !== 'granted') {
+                if (report) this.showAlert('צריך לאשר התראות בדפדפן כדי להירשם.', 'info');
+                return;
+            }
 
             const ready = await navigator.serviceWorker.ready;
             const sub = (await ready.pushManager.getSubscription()) ||
@@ -1978,13 +2120,21 @@ class OrderSystem {
                     userVisibleOnly: true,
                     applicationServerKey: this.urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
                 }));
-            await this.syncPushSubscription(sub);
+            const resp = await this.syncPushSubscription(sub);
+
+            if (report) {
+                if (resp && resp.ok) {
+                    this.showAlert('✅ נרשמת להתראות בהצלחה!', 'success');
+                } else {
+                    this.showAlert('ההרשמה לשרת נכשלה: ' + ((resp && resp.error) || 'שגיאה לא ידועה'), 'error');
+                }
+            }
         } catch (e) {
-            // Push not configured / unsupported — silently fall back to the in-app banner
+            if (report) this.showAlert('שגיאה בהרשמה להתראות: ' + ((e && e.message) || e), 'error');
         }
     }
 
-    // Re-send the current per-supplier schedule to the server (after schedule changes)
+    // Re-send the current per-supplier schedule to the server; returns the parsed JSON (or null)
     syncPushSubscription(subscription) {
         const schedule = this.suppliers
             .filter(s => Array.isArray(s.orderDays) && s.orderDays.length)
@@ -1993,7 +2143,7 @@ class OrderSystem {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ subscription, schedule })
-        }).catch(() => { /* ignore network/availability errors */ });
+        }).then(r => r.json()).catch(() => null);
     }
 
     // Push schedule update without forcing a (re)subscribe — used after supplier edits
@@ -2054,6 +2204,9 @@ class OrderSystem {
             }
 
             html += `<div class="history-items">📱 נשלח דרך: ${this.getSendMethodName(item.sendMethod)}</div>`;
+            if (item.createdByName) {
+                html += `<div class="history-items">👤 הוזמן ע"י: ${item.createdByName}${item.approvedByName ? ` · אושר ע"י: ${item.approvedByName}` : ''}</div>`;
+            }
 
             historyCard.innerHTML = html;
             container.appendChild(historyCard);

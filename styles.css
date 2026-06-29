@@ -586,6 +586,13 @@ label {
     border-color: #4CAF50;
 }
 
+.login-name-select {
+    font-family: inherit;
+    letter-spacing: normal;
+    text-align: right;
+    background: white;
+}
+
 .login-error {
     background: #f8d7da;
     color: #721c24;

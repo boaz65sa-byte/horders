@@ -1,27 +1,29 @@
-// /api/data — shared product/supplier bank stored in Redis (Upstash/Vercel KV).
-// GET  -> { products, suppliers } (null if not seeded yet)
-// POST -> { products?, suppliers? }  saves whichever arrays are provided
+// /api/data — shared bank stored in Redis (Upstash/Vercel KV).
+// GET  -> { products, suppliers, staff, pendingOrders, history }  (null per key if unset)
+// POST -> any subset of those arrays; each provided array is saved.
 const kv = require('../kvclient');
+
+const KEYS = ['products', 'suppliers', 'staff', 'pendingOrders', 'history'];
 
 module.exports = async (req, res) => {
     if (!kv.configured()) {
-        // Reveal which storage env var NAMES exist (no values) to help finish setup
         res.status(503).json({ error: 'KV not configured', envHints: kv.envHints() });
         return;
     }
 
     try {
         if (req.method === 'GET') {
-            const products = await kv.get('data:products');
-            const suppliers = await kv.get('data:suppliers');
-            res.status(200).json({ products: products || null, suppliers: suppliers || null });
+            const out = {};
+            for (const k of KEYS) out[k] = (await kv.get('data:' + k)) || null;
+            res.status(200).json(out);
             return;
         }
 
         if (req.method === 'POST') {
             const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
-            if (Array.isArray(body.products)) await kv.set('data:products', body.products);
-            if (Array.isArray(body.suppliers)) await kv.set('data:suppliers', body.suppliers);
+            for (const k of KEYS) {
+                if (Array.isArray(body[k])) await kv.set('data:' + k, body[k]);
+            }
             res.status(200).json({ ok: true });
             return;
         }
