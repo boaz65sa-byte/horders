@@ -17,19 +17,19 @@ module.exports = async (req, res) => {
         }
     }
 
-    if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
-        res.status(500).json({ error: 'VAPID keys not configured' });
-        return;
-    }
     if (!kv.configured()) {
         res.status(503).json({ error: 'KV not configured', envHints: kv.envHints() });
         return;
     }
 
+    // VAPID keys: env vars take precedence; embedded defaults let push work out of the box.
+    const VAPID_PUBLIC = process.env.VAPID_PUBLIC_KEY || 'BJHKK8cXG8aunkKsJe8KyjR4xbgFkWJDVWWfwkc2wSnF01iLk-wHDob9APbY1YMAdh4m1iNDx31d9ns3bpA6Qxo';
+    const VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY || 'XugWRNtfVdbwwv3AUvjxGCtqD7R6cfaeyOtGs3OI3jI';
+
     webpush.setVapidDetails(
         process.env.VAPID_SUBJECT || 'mailto:boaz65sa@gmail.com',
-        process.env.VAPID_PUBLIC_KEY,
-        process.env.VAPID_PRIVATE_KEY
+        VAPID_PUBLIC,
+        VAPID_PRIVATE
     );
 
     const short = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Jerusalem', weekday: 'short' }).format(new Date());
