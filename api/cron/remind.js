@@ -1,7 +1,7 @@
 // GET /api/cron/remind  — triggered daily by Vercel Cron (see vercel.json).
 // Sends a push notification to every subscribed browser whose schedule
 // marks today (Israel time) as an order day.
-const { kv } = require('@vercel/kv');
+const kv = require('../../kvclient');
 const webpush = require('web-push');
 
 const DAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
@@ -21,6 +21,10 @@ module.exports = async (req, res) => {
         res.status(500).json({ error: 'VAPID keys not configured' });
         return;
     }
+    if (!kv.configured()) {
+        res.status(503).json({ error: 'KV not configured', envHints: kv.envHints() });
+        return;
+    }
 
     webpush.setVapidDetails(
         process.env.VAPID_SUBJECT || 'mailto:boaz65sa@gmail.com',
@@ -28,7 +32,6 @@ module.exports = async (req, res) => {
         process.env.VAPID_PRIVATE_KEY
     );
 
-    // Today's weekday in Israel time
     const short = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Jerusalem', weekday: 'short' }).format(new Date());
     const today = SHORT_TO_NUM[short];
 
@@ -52,7 +55,6 @@ module.exports = async (req, res) => {
             await webpush.sendNotification(rec.subscription, payload);
             sent++;
         } catch (err) {
-            // 404/410 = subscription expired → clean it up
             if (err && (err.statusCode === 404 || err.statusCode === 410)) {
                 await kv.hdel('subscriptions', id);
                 removed++;

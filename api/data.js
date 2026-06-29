@@ -1,9 +1,15 @@
-// /api/data — shared product/supplier bank stored in Vercel KV.
+// /api/data — shared product/supplier bank stored in Redis (Upstash/Vercel KV).
 // GET  -> { products, suppliers } (null if not seeded yet)
 // POST -> { products?, suppliers? }  saves whichever arrays are provided
-const { kv } = require('@vercel/kv');
+const kv = require('../kvclient');
 
 module.exports = async (req, res) => {
+    if (!kv.configured()) {
+        // Reveal which storage env var NAMES exist (no values) to help finish setup
+        res.status(503).json({ error: 'KV not configured', envHints: kv.envHints() });
+        return;
+    }
+
     try {
         if (req.method === 'GET') {
             const products = await kv.get('data:products');

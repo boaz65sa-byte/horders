@@ -1,11 +1,15 @@
 // POST /api/subscribe
 // Stores a browser's push subscription + its per-supplier order-day schedule.
-const { kv } = require('@vercel/kv');
+const kv = require('../kvclient');
 const crypto = require('crypto');
 
 module.exports = async (req, res) => {
     if (req.method !== 'POST') {
         res.status(405).json({ error: 'method not allowed' });
+        return;
+    }
+    if (!kv.configured()) {
+        res.status(503).json({ error: 'KV not configured', envHints: kv.envHints() });
         return;
     }
 
@@ -18,15 +22,12 @@ module.exports = async (req, res) => {
             return;
         }
 
-        // Stable id per browser endpoint
         const id = crypto.createHash('sha256').update(subscription.endpoint).digest('hex').slice(0, 32);
 
-        await kv.hset('subscriptions', {
-            [id]: {
-                subscription,
-                schedule: Array.isArray(schedule) ? schedule : [],
-                updatedAt: Date.now()
-            }
+        await kv.hset('subscriptions', id, {
+            subscription,
+            schedule: Array.isArray(schedule) ? schedule : [],
+            updatedAt: Date.now()
         });
 
         res.status(200).json({ ok: true, id });
