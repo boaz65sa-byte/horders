@@ -8,6 +8,138 @@
 const VAPID_PUBLIC_KEY = 'BJHKK8cXG8aunkKsJe8KyjR4xbgFkWJDVWWfwkc2wSnF01iLk-wHDob9APbY1YMAdh4m1iNDx31d9ns3bpA6Qxo';
 
 // ===========================
+// Product catalog (single source of truth for default products + images)
+// ===========================
+// md  = clean TheMealDB ingredient image (verified). en = loremflickr keyword (fallback).
+// kw  = Hebrew root used to auto-match images for typed/imported product names.
+// sup = supplier id (1 ירקות/פירות · 2 בשר/עוף/דגים · 3 ביצים · 4 תנובה · 5 גבינות גד · 9 מאפים).
+function lfImage(keyword) {
+    let lock = 0;
+    for (let i = 0; i < keyword.length; i++) lock = (lock * 31 + keyword.charCodeAt(i)) >>> 0;
+    return 'https://loremflickr.com/320/240/' + encodeURIComponent(keyword) + '?lock=' + (lock % 100000);
+}
+function catalogImage(entry) {
+    if (!entry) return '';
+    return entry.md
+        ? 'https://www.themealdb.com/images/ingredients/' + encodeURIComponent(entry.md) + '-Small.png'
+        : lfImage(entry.en || entry.he);
+}
+
+const PRODUCT_CATALOG = [
+    // ---- ירקות (sup 1) ----
+    { he: 'עגבניות', kw: 'עגבני', md: 'Tomato', sup: '1', price: 10, unit: 'ק״ג' },
+    { he: 'עגבניות שרי', kw: 'שרי', en: 'cherry tomato', sup: '1', price: 14, unit: 'ק״ג' },
+    { he: 'מלפפונים', kw: 'מלפפ', md: 'Cucumber', sup: '1', price: 9, unit: 'ק״ג' },
+    { he: 'חסה', kw: 'חסה', md: 'Lettuce', sup: '1', price: 8, unit: 'יחידה' },
+    { he: 'בצל', kw: 'בצל', md: 'Onion', sup: '1', price: 6, unit: 'ק״ג' },
+    { he: 'בצל סגול', kw: 'בצל סגול', md: 'Red Onion', sup: '1', price: 8, unit: 'ק״ג' },
+    { he: 'בצל ירוק', kw: 'בצל ירוק', md: 'Spring Onions', sup: '1', price: 5, unit: 'יחידה' },
+    { he: 'שום', kw: 'שום', md: 'Garlic', sup: '1', price: 25, unit: 'ק״ג' },
+    { he: 'גזר', kw: 'גזר', md: 'Carrots', sup: '1', price: 6, unit: 'ק״ג' },
+    { he: 'תפוחי אדמה', kw: 'תפוחי אדמ', md: 'Potatoes', sup: '1', price: 5, unit: 'ק״ג' },
+    { he: 'בטטה', kw: 'בטטה', en: 'sweet potato', sup: '1', price: 9, unit: 'ק״ג' },
+    { he: 'פלפל אדום', kw: 'פלפל אדום', md: 'Red Pepper', sup: '1', price: 12, unit: 'ק״ג' },
+    { he: 'פלפל ירוק', kw: 'פלפל ירוק', md: 'Green Pepper', sup: '1', price: 11, unit: 'ק״ג' },
+    { he: 'פלפל צהוב', kw: 'פלפל צהוב', en: 'yellow bell pepper', sup: '1', price: 13, unit: 'ק״ג' },
+    { he: 'חציל', kw: 'חציל', md: 'Aubergine', sup: '1', price: 7, unit: 'ק״ג' },
+    { he: 'קישוא', kw: 'קישוא', md: 'Courgettes', sup: '1', price: 7, unit: 'ק״ג' },
+    { he: 'כרוב', kw: 'כרוב', md: 'Cabbage', sup: '1', price: 5, unit: 'ק״ג' },
+    { he: 'כרובית', kw: 'כרובית', en: 'cauliflower', sup: '1', price: 8, unit: 'ק״ג' },
+    { he: 'ברוקולי', kw: 'ברוקולי', md: 'Broccoli', sup: '1', price: 12, unit: 'ק״ג' },
+    { he: 'תירס', kw: 'תירס', md: 'Sweetcorn', sup: '1', price: 6, unit: 'יחידה' },
+    { he: 'אפונה', kw: 'אפונה', md: 'Peas', sup: '1', price: 10, unit: 'ק״ג' },
+    { he: 'שעועית ירוקה', kw: 'שעועית', md: 'Green Beans', sup: '1', price: 12, unit: 'ק״ג' },
+    { he: 'פטריות', kw: 'פטריות', md: 'Mushrooms', sup: '1', price: 18, unit: 'ק״ג' },
+    { he: 'סלק', kw: 'סלק', md: 'Beetroot', sup: '1', price: 6, unit: 'ק״ג' },
+    { he: 'צנון', kw: 'צנון', md: 'Radish', sup: '1', price: 7, unit: 'יחידה' },
+    { he: 'דלעת', kw: 'דלעת', md: 'Pumpkin', sup: '1', price: 6, unit: 'ק״ג' },
+    { he: 'תרד', kw: 'תרד', md: 'Spinach', sup: '1', price: 10, unit: 'יחידה' },
+    { he: 'פטרוזיליה', kw: 'פטרוז', md: 'Parsley', sup: '1', price: 3, unit: 'יחידה' },
+    { he: 'כוסברה', kw: 'כוסבר', md: 'Coriander', sup: '1', price: 3, unit: 'יחידה' },
+    { he: 'שמיר', kw: 'שמיר', md: 'Dill', sup: '1', price: 3, unit: 'יחידה' },
+    { he: 'סלרי', kw: 'סלרי', md: 'Celery', sup: '1', price: 7, unit: 'יחידה' },
+    { he: 'במיה', kw: 'במיה', en: 'okra', sup: '1', price: 16, unit: 'ק״ג' },
+    { he: 'קולורבי', kw: 'קולורבי', en: 'kohlrabi', sup: '1', price: 7, unit: 'ק״ג' },
+    { he: 'לימון', kw: 'לימון', md: 'Lemon', sup: '1', price: 9, unit: 'ק״ג' },
+    // ---- פירות (sup 1) ----
+    { he: 'תפוחים', kw: 'תפוח', md: 'Apple', sup: '1', price: 9, unit: 'ק״ג' },
+    { he: 'בננות', kw: 'בננ', md: 'Banana', sup: '1', price: 8, unit: 'ק״ג' },
+    { he: 'תפוזים', kw: 'תפוז', md: 'Orange', sup: '1', price: 7, unit: 'ק״ג' },
+    { he: 'אגסים', kw: 'אגס', en: 'pear', sup: '1', price: 10, unit: 'ק״ג' },
+    { he: 'ענבים', kw: 'ענב', en: 'grapes', sup: '1', price: 14, unit: 'ק״ג' },
+    { he: 'אבטיח', kw: 'אבטיח', en: 'watermelon', sup: '1', price: 4, unit: 'ק״ג' },
+    { he: 'מלון', kw: 'מלון', en: 'cantaloupe melon', sup: '1', price: 6, unit: 'ק״ג' },
+    { he: 'תות שדה', kw: 'תות', md: 'Strawberries', sup: '1', price: 18, unit: 'ק״ג' },
+    { he: 'אפרסקים', kw: 'אפרסק', en: 'peach', sup: '1', price: 12, unit: 'ק״ג' },
+    { he: 'נקטרינות', kw: 'נקטר', en: 'nectarine', sup: '1', price: 12, unit: 'ק״ג' },
+    { he: 'שזיפים', kw: 'שזיף', en: 'plum', sup: '1', price: 11, unit: 'ק״ג' },
+    { he: 'משמש', kw: 'משמש', md: 'Apricot', sup: '1', price: 13, unit: 'ק״ג' },
+    { he: 'קיווי', kw: 'קיווי', md: 'Kiwi', sup: '1', price: 14, unit: 'ק״ג' },
+    { he: 'מנגו', kw: 'מנגו', md: 'Mango', sup: '1', price: 15, unit: 'ק״ג' },
+    { he: 'אבוקדו', kw: 'אבוקדו', md: 'Avocado', sup: '1', price: 16, unit: 'ק״ג' },
+    { he: 'אננס', kw: 'אננס', md: 'Pineapple', sup: '1', price: 12, unit: 'יחידה' },
+    { he: 'רימונים', kw: 'רימון', md: 'Pomegranate', sup: '1', price: 13, unit: 'ק״ג' },
+    { he: 'אשכוליות', kw: 'אשכול', md: 'Grapefruit', sup: '1', price: 7, unit: 'ק״ג' },
+    { he: 'קלמנטינות', kw: 'קלמנט', en: 'mandarin orange', sup: '1', price: 8, unit: 'ק״ג' },
+    { he: 'דובדבנים', kw: 'דובדבן', en: 'cherries', sup: '1', price: 30, unit: 'ק״ג' },
+    { he: 'תאנים', kw: 'תאנ', en: 'fig fruit', sup: '1', price: 20, unit: 'ק״ג' },
+    { he: 'תמרים', kw: 'תמר', en: 'dates fruit', sup: '1', price: 25, unit: 'ק״ג' },
+    // ---- בשר / עוף / דגים (sup 2) ----
+    { he: 'עוף שלם', kw: 'עוף', md: 'Chicken', sup: '2', price: 18, unit: 'ק״ג' },
+    { he: 'חזה עוף', kw: 'חזה עוף', md: 'Chicken Breast', sup: '2', price: 35, unit: 'ק״ג' },
+    { he: 'שוקיים עוף', kw: 'שוק', md: 'Chicken Thighs', sup: '2', price: 20, unit: 'ק״ג' },
+    { he: 'כנפי עוף', kw: 'כנפ', md: 'Chicken Wings', sup: '2', price: 16, unit: 'ק״ג' },
+    { he: 'פרגיות', kw: 'פרגי', en: 'chicken thigh meat', sup: '2', price: 28, unit: 'ק״ג' },
+    { he: 'בשר טחון', kw: 'טחון', md: 'Minced Beef', sup: '2', price: 42, unit: 'ק״ג' },
+    { he: 'אנטריקוט', kw: 'אנטריק', en: 'ribeye steak', sup: '2', price: 120, unit: 'ק״ג' },
+    { he: 'סטייק', kw: 'סטייק', en: 'beef steak', sup: '2', price: 90, unit: 'ק״ג' },
+    { he: 'צלעות בקר', kw: 'צלעות', en: 'beef ribs', sup: '2', price: 60, unit: 'ק״ג' },
+    { he: 'בשר כבש', kw: 'כבש', md: 'Lamb', sup: '2', price: 90, unit: 'ק״ג' },
+    { he: 'הודו', kw: 'הודו', md: 'Turkey', sup: '2', price: 30, unit: 'ק״ג' },
+    { he: 'כבד עוף', kw: 'כבד', en: 'chicken liver', sup: '2', price: 15, unit: 'ק״ג' },
+    { he: 'נקניקיות', kw: 'נקניק', md: 'Sausages', sup: '2', price: 28, unit: 'ק״ג' },
+    { he: 'דגי סלמון', kw: 'סלמון', md: 'Salmon', sup: '2', price: 70, unit: 'ק״ג' },
+    { he: 'טונה', kw: 'טונה', md: 'Tuna', sup: '2', price: 65, unit: 'ק״ג' },
+    { he: 'דניס', kw: 'דניס', en: 'sea bream fish', sup: '2', price: 45, unit: 'ק״ג' },
+    { he: 'מושט', kw: 'מושט', en: 'tilapia fish', sup: '2', price: 35, unit: 'ק״ג' },
+    { he: 'בקלה', kw: 'בקלה', md: 'Cod', sup: '2', price: 55, unit: 'ק״ג' },
+    { he: 'שרימפס', kw: 'שרימפ', md: 'Prawns', sup: '2', price: 80, unit: 'ק״ג' },
+    // ---- ביצים (sup 3) ----
+    { he: 'ביצים L', kw: 'ביצים', md: 'Egg', sup: '3', price: 18, unit: 'יחידה' },
+    { he: 'ביצים M', kw: 'ביצים M', md: 'Egg', sup: '3', price: 16, unit: 'יחידה' },
+    { he: 'ביצים XL', kw: 'ביצים XL', md: 'Egg', sup: '3', price: 20, unit: 'יחידה' },
+    { he: 'ביצים אורגניות', kw: 'אורגני', md: 'Egg', sup: '3', price: 28, unit: 'יחידה' },
+    { he: 'ביצי שליו', kw: 'שליו', en: 'quail eggs', sup: '3', price: 22, unit: 'יחידה' },
+    // ---- חלב ומוצריו (sup 4) ----
+    { he: 'חלב 3%', kw: 'חלב', md: 'Milk', sup: '4', price: 6, unit: 'יחידה' },
+    { he: 'חלב 1%', kw: 'חלב 1', md: 'Milk', sup: '4', price: 6, unit: 'יחידה' },
+    { he: 'יוגורט', kw: 'יוגורט', md: 'Yogurt', sup: '4', price: 5, unit: 'יחידה' },
+    { he: 'חמאה', kw: 'חמאה', md: 'Butter', sup: '4', price: 8, unit: 'יחידה' },
+    { he: 'שמנת', kw: 'שמנת', md: 'Cream', sup: '4', price: 7, unit: 'יחידה' },
+    { he: 'שמנת חמוצה', kw: 'חמוצה', en: 'sour cream', sup: '4', price: 6, unit: 'יחידה' },
+    { he: 'לבן', kw: 'לבן', en: 'kefir', sup: '4', price: 6, unit: 'יחידה' },
+    // ---- גבינות (sup 5) ----
+    { he: 'גבינה צהובה', kw: 'צהובה', md: 'Cheese', sup: '5', price: 25, unit: 'ק״ג' },
+    { he: 'גבינה לבנה', kw: 'גבינה לבנה', en: 'cream cheese', sup: '5', price: 12, unit: 'יחידה' },
+    { he: 'גבינה בולגרית', kw: 'בולגרית', md: 'Feta', sup: '5', price: 18, unit: 'ק״ג' },
+    { he: 'גבינת פטה', kw: 'פטה', md: 'Feta', sup: '5', price: 20, unit: 'ק״ג' },
+    { he: 'גבינת עיזים', kw: 'עיזים', md: 'Goats Cheese', sup: '5', price: 35, unit: 'ק״ג' },
+    { he: 'מוצרלה', kw: 'מוצרל', md: 'Mozzarella', sup: '5', price: 30, unit: 'ק״ג' },
+    { he: 'פרמזן', kw: 'פרמז', md: 'Parmesan', sup: '5', price: 60, unit: 'ק״ג' },
+    { he: 'גאודה', kw: 'גאודה', en: 'gouda cheese', sup: '5', price: 38, unit: 'ק״ג' },
+    { he: 'קוטג׳', kw: 'קוטג', en: 'cottage cheese', sup: '5', price: 10, unit: 'יחידה' },
+    { he: 'ריקוטה', kw: 'ריקוט', md: 'Ricotta', sup: '5', price: 22, unit: 'יחידה' },
+    { he: 'מסקרפונה', kw: 'מסקרפ', md: 'Mascarpone', sup: '5', price: 28, unit: 'יחידה' },
+    // ---- מאפים (sup 9) ----
+    { he: 'לחם פרוס', kw: 'לחם', en: 'sliced bread', sup: '9', price: 8, unit: 'יחידה' },
+    { he: 'חלה', kw: 'חלה', en: 'challah bread', sup: '9', price: 12, unit: 'יחידה' },
+    { he: 'לחמניות', kw: 'לחמני', en: 'bread rolls', sup: '9', price: 10, unit: 'יחידה' },
+    { he: 'פיתות', kw: 'פיתה', en: 'pita bread', sup: '9', price: 8, unit: 'יחידה' },
+    { he: 'באגט', kw: 'באגט', en: 'baguette', sup: '9', price: 9, unit: 'יחידה' },
+    { he: 'בורקס', kw: 'בורקס', en: 'borek pastry', sup: '9', price: 6, unit: 'יחידה' }
+];
+
+// ===========================
 // Authentication System
 // ===========================
 
@@ -342,6 +474,11 @@ class OrderSystem {
         this.setupEventListeners();
         this.loadSupplierSelects();
         this.loadSuppliersDisplay();
+        // One-time: add the full product catalog to an existing bank
+        if (!this.loadData('catalogSeededV1')) {
+            this.seedCatalog(true);
+            this.saveData('catalogSeededV1', true);
+        }
         this.autoFillImages(true); // fill missing product images from the web (silent)
         this.renderAllProducts();
         this.loadHistory();
@@ -374,43 +511,15 @@ class OrderSystem {
     }
 
     getDefaultProducts() {
-        const products = [
-            // Vegetables & Fruits
-            { id: '1', supplierId: '1', name: 'חסה', price: 8, unit: 'ק״ג' },
-            { id: '2', supplierId: '1', name: 'עגבניות', price: 12, unit: 'ק״ג' },
-            { id: '3', supplierId: '1', name: 'מלפפונים', price: 10, unit: 'ק״ג' },
-            { id: '4', supplierId: '1', name: 'תפוחי אדמה', price: 5, unit: 'ק״ג' },
-            { id: '5', supplierId: '1', name: 'בצל', price: 6, unit: 'ק״ג' },
-            { id: '6', supplierId: '1', name: 'גזר', price: 7, unit: 'ק״ג' },
-            { id: '7', supplierId: '1', name: 'תפוחים', price: 15, unit: 'ק״ג' },
-            // Meat & Poultry
-            { id: '8', supplierId: '2', name: 'עוף שלם', price: 25, unit: 'ק״ג' },
-            { id: '9', supplierId: '2', name: 'חזה עוף', price: 35, unit: 'ק״ג' },
-            { id: '10', supplierId: '2', name: 'בשר טחון', price: 40, unit: 'ק״ג' },
-            { id: '11', supplierId: '2', name: 'סטייק', price: 80, unit: 'ק״ג' },
-            { id: '12', supplierId: '2', name: 'דגי סלמון', price: 60, unit: 'ק״ג' },
-            // Eggs
-            { id: '13', supplierId: '3', name: 'ביצים L', price: 18, unit: 'יחידה' },
-            { id: '14', supplierId: '3', name: 'ביצים M', price: 16, unit: 'יחידה' },
-            { id: '15', supplierId: '3', name: 'ביצים XL', price: 20, unit: 'יחידה' },
-            // Tnuva
-            { id: '16', supplierId: '4', name: 'חלב 3%', price: 6, unit: 'יחידה' },
-            { id: '17', supplierId: '4', name: 'יוגורט', price: 5, unit: 'יחידה' },
-            { id: '18', supplierId: '4', name: 'גבינה לבנה', price: 12, unit: 'יחידה' },
-            { id: '19', supplierId: '4', name: 'חמאה', price: 8, unit: 'יחידה' },
-            { id: '20', supplierId: '4', name: 'גבינה צהובה', price: 25, unit: 'ק״ג' },
-            // Gad
-            { id: '21', supplierId: '5', name: 'קוטג׳', price: 10, unit: 'יחידה' },
-            { id: '22', supplierId: '5', name: 'שמנת', price: 7, unit: 'יחידה' },
-            { id: '23', supplierId: '5', name: 'גבינת עיזים', price: 30, unit: 'יחידה' },
-            { id: '24', supplierId: '5', name: 'גבינה בולגרית', price: 15, unit: 'יחידה' },
-            // More products...
-            { id: '25', supplierId: '9', name: 'לחם פרוס', price: 8, unit: 'יחידה' },
-            { id: '26', supplierId: '9', name: 'חלה', price: 12, unit: 'יחידה' },
-            { id: '27', supplierId: '9', name: 'בורקס', price: 5, unit: 'יחידה' },
-        ];
-        // Attach a matching web image to each default product
-        return products.map(p => ({ ...p, image: this.getProductImageUrl(p.name) }));
+        // Built from the full PRODUCT_CATALOG (vegetables, fruits, meat, fish, eggs, dairy, cheese, bakery)
+        return PRODUCT_CATALOG.map((e, i) => ({
+            id: String(i + 1),
+            supplierId: e.sup,
+            name: e.he,
+            price: e.price,
+            unit: e.unit,
+            image: catalogImage(e)
+        }));
     }
 
     // ===========================
@@ -483,6 +592,9 @@ class OrderSystem {
 
         const autofillImagesBtn = document.getElementById('autofill-images-btn');
         if (autofillImagesBtn) autofillImagesBtn.addEventListener('click', () => this.autoFillImages(false));
+
+        const seedCatalogBtn = document.getElementById('seed-catalog-btn');
+        if (seedCatalogBtn) seedCatalogBtn.addEventListener('click', () => this.seedCatalog(false));
         
         // Excel import
         const excelFile = document.getElementById('excel-file');
@@ -842,44 +954,11 @@ class OrderSystem {
     // Order matters — more specific Hebrew phrases must come before generic ones.
     getProductImageUrl(name) {
         if (!name) return '';
-        const M = 'https://www.themealdb.com/images/ingredients/';
-        const img = (ing) => M + encodeURIComponent(ing) + '-Small.png';
-        const lf = (kw, lock) => 'https://loremflickr.com/320/240/' + encodeURIComponent(kw) + '?lock=' + lock;
-
-        const map = [
-            ['חזה', img('Chicken Breast')],
-            ['עוף', img('Chicken')],
-            ['תפוחי אדמה', img('Potatoes')],
-            ['תפוח אדמה', img('Potatoes')],
-            ['תפוח', img('Apple')],
-            ['עגבני', img('Tomato')],
-            ['מלפפון', img('Cucumber')],
-            ['בצל', img('Onion')],
-            ['גזר', img('Carrots')],
-            ['חסה', img('Lettuce')],
-            ['בשר טחון', img('Minced Beef')],
-            ['טחון', img('Minced Beef')],
-            ['סטייק', lf('steak', 7)],
-            ['סלמון', img('Salmon')],
-            ['דג', img('Salmon')],
-            ['ביצי', img('Egg')],
-            ['ביצה', img('Egg')],
-            ['חלב', img('Milk')],
-            ['יוגורט', img('Yogurt')],
-            ['חמאה', img('Butter')],
-            ['צהובה', img('Cheese')],
-            ['עיזים', img('Goats Cheese')],
-            ['בולגרית', img('Feta')],
-            ['קוטג', lf('cottage cheese', 11)],
-            ['שמנת', img('Cream')],
-            ['גבינה', img('Cheese')],
-            ['חלה', img('Bread')],
-            ['לחם', img('Bread')],
-            ['בורקס', lf('borek pastry', 13)]
-        ];
-
-        for (const [kw, url] of map) {
-            if (name.indexOf(kw) !== -1) return url;
+        // Match against the catalog, longest keyword first so specific items win
+        // (e.g. "חזה עוף" before "עוף", "תפוח אדמ" before "תפוח").
+        const entries = PRODUCT_CATALOG.slice().sort((a, b) => b.kw.length - a.kw.length);
+        for (const e of entries) {
+            if (name.indexOf(e.kw) !== -1) return catalogImage(e);
         }
         return '';
     }
@@ -907,6 +986,43 @@ class OrderSystem {
             );
         }
         return count;
+    }
+
+    // Add every catalog product that isn't already in the bank (idempotent).
+    seedCatalog(silent) {
+        const existing = new Set(this.products.map(p => p.supplierId + '|' + p.name));
+        let added = 0;
+
+        PRODUCT_CATALOG.forEach(e => {
+            const key = e.sup + '|' + e.he;
+            if (!existing.has(key)) {
+                this.products.push({
+                    id: Date.now().toString() + Math.random().toString(36).slice(2, 7),
+                    supplierId: e.sup,
+                    name: e.he,
+                    price: e.price,
+                    unit: e.unit,
+                    image: catalogImage(e)
+                });
+                existing.add(key);
+                added++;
+            }
+        });
+
+        if (added > 0) {
+            this.saveData('products', this.products);
+            this.renderAllProducts();
+            const sid = document.getElementById('supplier-select').value;
+            if (sid) this.loadProducts(sid);
+        }
+
+        if (!silent) {
+            this.showAlert(
+                added > 0 ? `✅ נוספו ${added} מוצרים מהקטלוג` : 'כל מוצרי הקטלוג כבר קיימים',
+                'success'
+            );
+        }
+        return added;
     }
 
     // ===========================
