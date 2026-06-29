@@ -342,6 +342,7 @@ class OrderSystem {
         this.setupEventListeners();
         this.loadSupplierSelects();
         this.loadSuppliersDisplay();
+        this.autoFillImages(true); // fill missing product images from the web (silent)
         this.renderAllProducts();
         this.loadHistory();
         this.loadPreferences();
@@ -373,7 +374,7 @@ class OrderSystem {
     }
 
     getDefaultProducts() {
-        return [
+        const products = [
             // Vegetables & Fruits
             { id: '1', supplierId: '1', name: 'חסה', price: 8, unit: 'ק״ג' },
             { id: '2', supplierId: '1', name: 'עגבניות', price: 12, unit: 'ק״ג' },
@@ -408,6 +409,8 @@ class OrderSystem {
             { id: '26', supplierId: '9', name: 'חלה', price: 12, unit: 'יחידה' },
             { id: '27', supplierId: '9', name: 'בורקס', price: 5, unit: 'יחידה' },
         ];
+        // Attach a matching web image to each default product
+        return products.map(p => ({ ...p, image: this.getProductImageUrl(p.name) }));
     }
 
     // ===========================
@@ -477,6 +480,9 @@ class OrderSystem {
         // Products tab
         const addProductBtn = document.getElementById('add-product-btn');
         if (addProductBtn) addProductBtn.addEventListener('click', () => this.addProduct());
+
+        const autofillImagesBtn = document.getElementById('autofill-images-btn');
+        if (autofillImagesBtn) autofillImagesBtn.addEventListener('click', () => this.autoFillImages(false));
         
         // Excel import
         const excelFile = document.getElementById('excel-file');
@@ -825,6 +831,82 @@ class OrderSystem {
         }
 
         this.showAlert('המוצר נמחק', 'success');
+    }
+
+    // ===========================
+    // Auto image matching (from the web, by product name)
+    // ===========================
+
+    // Maps a Hebrew product name to a real photo URL.
+    // Clean ingredient photos from TheMealDB; loremflickr keyword photos as fallback.
+    // Order matters — more specific Hebrew phrases must come before generic ones.
+    getProductImageUrl(name) {
+        if (!name) return '';
+        const M = 'https://www.themealdb.com/images/ingredients/';
+        const img = (ing) => M + encodeURIComponent(ing) + '-Small.png';
+        const lf = (kw, lock) => 'https://loremflickr.com/320/240/' + encodeURIComponent(kw) + '?lock=' + lock;
+
+        const map = [
+            ['חזה', img('Chicken Breast')],
+            ['עוף', img('Chicken')],
+            ['תפוחי אדמה', img('Potatoes')],
+            ['תפוח אדמה', img('Potatoes')],
+            ['תפוח', img('Apple')],
+            ['עגבני', img('Tomato')],
+            ['מלפפון', img('Cucumber')],
+            ['בצל', img('Onion')],
+            ['גזר', img('Carrots')],
+            ['חסה', img('Lettuce')],
+            ['בשר טחון', img('Minced Beef')],
+            ['טחון', img('Minced Beef')],
+            ['סטייק', lf('steak', 7)],
+            ['סלמון', img('Salmon')],
+            ['דג', img('Salmon')],
+            ['ביצי', img('Egg')],
+            ['ביצה', img('Egg')],
+            ['חלב', img('Milk')],
+            ['יוגורט', img('Yogurt')],
+            ['חמאה', img('Butter')],
+            ['צהובה', img('Cheese')],
+            ['עיזים', img('Goats Cheese')],
+            ['בולגרית', img('Feta')],
+            ['קוטג', lf('cottage cheese', 11)],
+            ['שמנת', img('Cream')],
+            ['גבינה', img('Cheese')],
+            ['חלה', img('Bread')],
+            ['לחם', img('Bread')],
+            ['בורקס', lf('borek pastry', 13)]
+        ];
+
+        for (const [kw, url] of map) {
+            if (name.indexOf(kw) !== -1) return url;
+        }
+        return '';
+    }
+
+    autoFillImages(silent) {
+        let count = 0;
+        this.products.forEach(p => {
+            if (!p.image) {
+                const url = this.getProductImageUrl(p.name);
+                if (url) { p.image = url; count++; }
+            }
+        });
+
+        if (count > 0) {
+            this.saveData('products', this.products);
+            this.renderAllProducts();
+            const sid = document.getElementById('supplier-select').value;
+            if (sid) this.loadProducts(sid);
+        }
+
+        if (!silent) {
+            this.showAlert(
+                count > 0 ? `✅ נוספו תמונות ל-${count} מוצרים מהאינטרנט` : 'כל המוצרים כבר עם תמונה (או שאין התאמה אוטומטית)',
+                count > 0 ? 'success' : 'info'
+            );
+        }
+        return count;
     }
 
     // ===========================
