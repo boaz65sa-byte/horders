@@ -467,6 +467,8 @@ class OrderSystem {
         this.manualItems = [];
         this.excelPreviewData = null;
         this.pendingImageProductId = null;
+        this.sharedBankActive = false; // becomes true once the KV-backed shared bank is reachable
+        this._sharedSaveTimer = null;
         this.init();
     }
 
@@ -489,6 +491,7 @@ class OrderSystem {
         this.renderWeekdayPicker('supplier-order-days', []);
         this.checkOrderReminders();
         this.setupPush();
+        this.initSharedBank();
     }
 
     // ===========================
@@ -528,11 +531,67 @@ class OrderSystem {
 
     saveData(key, data) {
         localStorage.setItem(key, JSON.stringify(data));
+        // Mirror product/supplier changes to the shared (KV) bank when active
+        if (key === 'products' || key === 'suppliers') this.scheduleSharedSave();
+    }
+
+    // localStorage-only write (used when adopting server data, to avoid an echo POST)
+    saveLocal(key, data) {
+        localStorage.setItem(key, JSON.stringify(data));
     }
 
     loadData(key) {
         const data = localStorage.getItem(key);
         return data ? JSON.parse(data) : null;
+    }
+
+    // ===========================
+    // Shared bank (KV-backed, cross-device) — falls back to localStorage if not configured
+    // ===========================
+
+    async initSharedBank() {
+        try {
+            const r = await fetch('/api/data');
+            if (!r.ok) return; // KV not configured → stay local-only
+            const data = await r.json();
+            this.sharedBankActive = true;
+
+            if (Array.isArray(data.products) && data.products.length) {
+                // Adopt the shared bank as the source of truth
+                this.products = data.products;
+                this.saveLocal('products', this.products);
+                if (Array.isArray(data.suppliers) && data.suppliers.length) {
+                    this.suppliers = data.suppliers;
+                    this.saveLocal('suppliers', this.suppliers);
+                }
+                // Re-render everything with the shared data
+                this.loadSupplierSelects();
+                this.loadSuppliersDisplay();
+                this.renderAllProducts();
+                const sid = document.getElementById('supplier-select').value;
+                if (sid) this.loadProducts(sid);
+            } else {
+                // Shared bank is empty → seed it from this device
+                this.saveSharedBank();
+            }
+        } catch (e) {
+            // Offline or no server → localStorage only
+        }
+    }
+
+    scheduleSharedSave() {
+        if (!this.sharedBankActive) return;
+        clearTimeout(this._sharedSaveTimer);
+        this._sharedSaveTimer = setTimeout(() => this.saveSharedBank(), 800);
+    }
+
+    saveSharedBank() {
+        if (!this.sharedBankActive) return;
+        fetch('/api/data', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ products: this.products, suppliers: this.suppliers })
+        }).catch(() => { /* ignore transient errors */ });
     }
 
     // ===========================
