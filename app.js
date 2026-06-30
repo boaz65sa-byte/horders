@@ -637,8 +637,11 @@ class OrderSystem {
         this.renderApprovals();
         this.updateApprovalsBadge();
         if (typeof authSystem !== 'undefined' && authSystem) authSystem.populateLoginNames();
+        // Re-render the order products only if the user hasn't started an order (don't wipe quantities)
         const sid = document.getElementById('supplier-select').value;
-        if (sid) this.loadProducts(sid);
+        if (sid && this.currentOrder.length === 0 && this.manualItems.length === 0) {
+            this.loadProducts(sid);
+        }
     }
 
     scheduleSharedSave() {
@@ -845,6 +848,8 @@ class OrderSystem {
         ];
 
         selects.forEach(select => {
+            if (!select) return;
+            const prev = select.value; // preserve the current selection across a rebuild
             select.innerHTML = '<option value="">-- בחר ספק --</option>';
             this.suppliers.forEach(supplier => {
                 const option = document.createElement('option');
@@ -852,6 +857,7 @@ class OrderSystem {
                 option.textContent = supplier.name;
                 select.appendChild(option);
             });
+            if (prev) select.value = prev; // restore if the supplier still exists
         });
     }
 
