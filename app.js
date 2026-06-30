@@ -153,8 +153,10 @@ function loadStaff() {
     return DEFAULT_STAFF.map((n, i) => ({ id: String(i + 1), name: n }));
 }
 
-// Keys mirrored to the shared (KV) bank across devices
+// Array collections mirrored to the shared (KV) bank across devices
 const SHARED_KEYS = ['products', 'suppliers', 'staff', 'pendingOrders', 'history'];
+// Config objects mirrored to the shared bank (phones, procurement email)
+const SHARED_OBJECT_KEYS = ['approvalSettings'];
 
 // ===========================
 // Authentication System
@@ -577,8 +579,8 @@ class OrderSystem {
 
     saveData(key, data) {
         localStorage.setItem(key, JSON.stringify(data));
-        // Mirror shared keys (products/suppliers/staff/orders/history) to the KV bank
-        if (SHARED_KEYS.includes(key)) this.scheduleSharedSave();
+        // Mirror shared collections + config objects to the KV bank
+        if (SHARED_KEYS.includes(key) || SHARED_OBJECT_KEYS.includes(key)) this.scheduleSharedSave();
     }
 
     // localStorage-only write (used when adopting server data, to avoid an echo POST)
@@ -609,10 +611,18 @@ class OrderSystem {
                     this.saveLocal(k, data[k]);
                 }
             });
+            // Adopt shared config objects (e.g. approvalSettings)
+            SHARED_OBJECT_KEYS.forEach(k => {
+                if (data[k] && typeof data[k] === 'object' && !Array.isArray(data[k])) {
+                    this[k] = data[k];
+                    this.saveLocal(k, data[k]);
+                }
+            });
             this.rerenderAll();
 
-            // Seed only the collections the server doesn't have yet (don't clobber existing)
-            const missing = SHARED_KEYS.filter(k => !Array.isArray(data[k]));
+            // Seed only what the server doesn't have yet (don't clobber existing)
+            const missing = SHARED_KEYS.filter(k => !Array.isArray(data[k]))
+                .concat(SHARED_OBJECT_KEYS.filter(k => !(data[k] && typeof data[k] === 'object' && !Array.isArray(data[k]))));
             if (missing.length) {
                 const payload = {};
                 missing.forEach(k => { payload[k] = this[k]; });
@@ -636,6 +646,7 @@ class OrderSystem {
         this.loadHistory();
         this.renderApprovals();
         this.updateApprovalsBadge();
+        this.loadApprovalSettings(); // repopulate phone/procurement inputs from adopted settings
         if (typeof authSystem !== 'undefined' && authSystem) authSystem.populateLoginNames();
         // Re-render the order products only if the user hasn't started an order (don't wipe quantities)
         const sid = document.getElementById('supplier-select').value;
@@ -654,6 +665,7 @@ class OrderSystem {
         if (!this.sharedBankActive) return;
         const payload = {};
         SHARED_KEYS.forEach(k => { payload[k] = this[k]; });
+        SHARED_OBJECT_KEYS.forEach(k => { payload[k] = this[k]; });
         fetch('/api/data', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
