@@ -753,6 +753,11 @@ class OrderSystem {
         const seedCatalogBtn = document.getElementById('seed-catalog-btn');
         if (seedCatalogBtn) seedCatalogBtn.addEventListener('click', () => this.seedCatalog(false));
 
+        const saveProductBtn = document.getElementById('save-product-btn');
+        if (saveProductBtn) saveProductBtn.addEventListener('click', () => this.saveProductEdit());
+        const cancelProductEditBtn = document.getElementById('cancel-product-edit-btn');
+        if (cancelProductEditBtn) cancelProductEditBtn.addEventListener('click', () => this.closeProductEditModal());
+
         const addStaffBtn = document.getElementById('add-staff-btn');
         if (addStaffBtn) addStaffBtn.addEventListener('click', () => this.addStaff());
         
@@ -1065,6 +1070,7 @@ class OrderSystem {
                         <span class="managed-product-thumb ${product.image ? 'has-img' : ''}" onclick="orderSystem.openImagePicker('${product.id}')" ${product.image ? `style="background-image:url('${product.image}')"` : ''} title="${product.image ? 'החלף תמונה' : 'הוסף תמונה'}">${product.image ? '' : '📷'}</span>
                         <span class="managed-product-name">${product.name}</span>
                         <span class="managed-product-price">₪${Number(product.price).toFixed(2)} / ${product.unit}</span>
+                        <button class="btn btn-primary btn-small" onclick="orderSystem.editProduct('${product.id}')">✏️</button>
                         <button class="btn btn-secondary btn-small" onclick="orderSystem.deleteProduct('${product.id}')">🗑️</button>
                     </div>
                 `;
@@ -1086,6 +1092,7 @@ class OrderSystem {
                         <span class="managed-product-thumb ${product.image ? 'has-img' : ''}" onclick="orderSystem.openImagePicker('${product.id}')" ${product.image ? `style="background-image:url('${product.image}')"` : ''} title="${product.image ? 'החלף תמונה' : 'הוסף תמונה'}">${product.image ? '' : '📷'}</span>
                         <span class="managed-product-name">${product.name}</span>
                         <span class="managed-product-price">₪${Number(product.price).toFixed(2)} / ${product.unit}</span>
+                        <button class="btn btn-primary btn-small" onclick="orderSystem.editProduct('${product.id}')">✏️</button>
                         <button class="btn btn-secondary btn-small" onclick="orderSystem.deleteProduct('${product.id}')">🗑️</button>
                     </div>
                 `;
@@ -1109,6 +1116,56 @@ class OrderSystem {
         }
 
         this.showAlert('המוצר נמחק', 'success');
+    }
+
+    editProduct(productId) {
+        const product = this.products.find(p => p.id === productId);
+        if (!product) return;
+
+        document.getElementById('edit-product-id').value = product.id;
+        document.getElementById('edit-product-name').value = product.name;
+        document.getElementById('edit-product-price').value = product.price;
+        document.getElementById('edit-product-unit').value = product.unit || 'ק״ג';
+
+        // Populate the supplier dropdown and select the current one
+        const supSelect = document.getElementById('edit-product-supplier');
+        supSelect.innerHTML = '';
+        this.suppliers.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.id;
+            opt.textContent = s.name;
+            supSelect.appendChild(opt);
+        });
+        supSelect.value = product.supplierId;
+
+        document.getElementById('edit-product-modal').classList.add('active');
+    }
+
+    saveProductEdit() {
+        const id = document.getElementById('edit-product-id').value;
+        const product = this.products.find(p => p.id === id);
+        if (!product) return;
+
+        const name = document.getElementById('edit-product-name').value.trim();
+        const price = parseFloat(document.getElementById('edit-product-price').value);
+        if (!name) { alert('נא להזין שם מוצר'); return; }
+
+        product.name = name;
+        product.price = isNaN(price) ? 0 : price;
+        product.unit = document.getElementById('edit-product-unit').value;
+        product.supplierId = document.getElementById('edit-product-supplier').value;
+
+        this.saveData('products', this.products);
+        this.closeProductEditModal();
+        this.renderAllProducts();
+        const sid = document.getElementById('supplier-select').value;
+        if (sid) this.loadProducts(sid);
+
+        this.showAlert('✅ המוצר עודכן', 'success');
+    }
+
+    closeProductEditModal() {
+        document.getElementById('edit-product-modal').classList.remove('active');
     }
 
     // ===========================

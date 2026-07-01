@@ -394,6 +394,36 @@
         </div>
     </div>
 
+    <!-- Edit Product Modal -->
+    <div id="edit-product-modal" class="modal">
+        <div class="modal-content">
+            <h2>✏️ עריכת מוצר</h2>
+            <input type="hidden" id="edit-product-id">
+
+            <label for="edit-product-name">שם המוצר:</label>
+            <input type="text" id="edit-product-name" class="input-field">
+
+            <label for="edit-product-price">מחיר:</label>
+            <input type="number" id="edit-product-price" class="input-field" step="0.01" min="0">
+
+            <label for="edit-product-unit">יחידה:</label>
+            <select id="edit-product-unit" class="input-field">
+                <option value="ק״ג">ק״ג</option>
+                <option value="יחידה">יחידה</option>
+                <option value="ארגז">ארגז</option>
+                <option value="קרטון">קרטון</option>
+            </select>
+
+            <label for="edit-product-supplier">ספק:</label>
+            <select id="edit-product-supplier" class="input-field"></select>
+
+            <div class="modal-actions">
+                <button id="save-product-btn" class="btn btn-primary">💾 שמור</button>
+                <button id="cancel-product-edit-btn" class="btn btn-secondary">❌ ביטול</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Shared hidden input for product image upload (camera/gallery on mobile) -->
     <input type="file" id="product-image-input" accept="image/*" capture="environment" style="display: none;">
 
