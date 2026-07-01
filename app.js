@@ -710,6 +710,9 @@ class OrderSystem {
         if (supplierSelect) supplierSelect.addEventListener('change', (e) => this.onSupplierChange(e.target.value));
         if (sendOrderBtn) sendOrderBtn.addEventListener('click', () => this.submitForApproval());
         if (clearOrderBtn) clearOrderBtn.addEventListener('click', () => this.clearOrder());
+
+        const printOrderBtn = document.getElementById('print-order-btn');
+        if (printOrderBtn) printOrderBtn.addEventListener('click', () => this.printCurrentOrder());
         
         // Preferences
         const showPricesCheck = document.getElementById('show-prices');
@@ -1965,6 +1968,103 @@ class OrderSystem {
     }
 
     // ===========================
+    // Print / save an order (opens a print-friendly window → print or Save-as-PDF)
+    // ===========================
+
+    printCurrentOrder() {
+        const supplierId = document.getElementById('supplier-select').value;
+        const supplier = this.suppliers.find(s => s.id === supplierId);
+        if (!supplier || this.currentOrder.length === 0) {
+            alert('נא לבחור ספק ולהזין מוצרים לפני הדפסה');
+            return;
+        }
+        const orderedBy = (typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.name) ? authSystem.currentUser.name : '';
+        this.openPrintWindow(this.buildOrderPrintHtml({
+            supplierName: supplier.name,
+            deliveryDate: document.getElementById('delivery-date').value,
+            dateStr: new Date().toLocaleDateString('he-IL'),
+            items: this.currentOrder,
+            showPrices: this.preferences.showPrices,
+            orderedBy: orderedBy
+        }));
+    }
+
+    printHistoryOrder(orderId) {
+        const item = this.history.find(h => h.id === orderId);
+        if (!item) return;
+        this.openPrintWindow(this.buildOrderPrintHtml({
+            supplierName: item.supplier,
+            deliveryDate: item.deliveryDate,
+            dateStr: new Date(item.date).toLocaleDateString('he-IL'),
+            items: item.items,
+            showPrices: item.showedPrices,
+            orderedBy: item.createdByName || '',
+            approvedBy: item.approvedByName || ''
+        }));
+    }
+
+    buildOrderPrintHtml(o) {
+        const deliveryStr = o.deliveryDate ? new Date(o.deliveryDate).toLocaleDateString('he-IL') : '—';
+        let total = 0;
+        let rows = '';
+        o.items.forEach((it, i) => {
+            const lineTotal = it.total != null ? it.total : (it.price || 0) * it.quantity;
+            total += lineTotal;
+            rows += `<tr>
+                <td>${i + 1}</td>
+                <td class="name">${it.product}${it.manual ? ' ✍️' : ''}</td>
+                <td>${it.quantity} ${it.unit}</td>
+                ${o.showPrices ? `<td>₪${(it.price || 0).toFixed(2)}</td><td>₪${lineTotal.toFixed(2)}</td>` : ''}
+            </tr>`;
+        });
+
+        const priceHeaders = o.showPrices ? '<th>מחיר יח׳</th><th>סה״כ</th>' : '';
+        const totalRow = o.showPrices
+            ? `<tr class="grand"><td colspan="4">סה״כ להזמנה</td><td>₪${total.toFixed(2)}</td></tr>`
+            : '';
+        const byLine = [
+            o.orderedBy ? `הוזמן ע״י: ${o.orderedBy}` : '',
+            o.approvedBy ? `אושר ע״י: ${o.approvedBy}` : ''
+        ].filter(Boolean).join(' · ');
+
+        return `<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="UTF-8">
+<title>הזמנה - ${o.supplierName}</title>
+<style>
+  body{font-family:'Segoe UI',Arial,sans-serif;padding:30px;color:#222;}
+  h1{margin:0 0 4px;font-size:24px;}
+  .meta{color:#555;font-size:14px;margin-bottom:4px;}
+  table{width:100%;border-collapse:collapse;margin-top:18px;}
+  th,td{border:1px solid #ccc;padding:8px 10px;text-align:right;font-size:14px;}
+  th{background:#f0f0f0;}
+  td.name{font-weight:600;}
+  tr.grand td{font-weight:700;font-size:16px;background:#e8f5e9;}
+  .foot{margin-top:24px;color:#888;font-size:12px;}
+  @media print{button{display:none;}}
+</style></head><body>
+  <h1>🛒 הזמנה - ${o.supplierName}</h1>
+  <div class="meta">📅 תאריך הזמנה: ${o.dateStr} · אספקה מבוקשת: ${deliveryStr}</div>
+  ${byLine ? `<div class="meta">👤 ${byLine}</div>` : ''}
+  <table>
+    <thead><tr><th>#</th><th>מוצר</th><th>כמות</th>${priceHeaders}</tr></thead>
+    <tbody>${rows}${totalRow}</tbody>
+  </table>
+  <div class="foot">מערכת הזמנות ספקים · ${o.items.length} פריטים</div>
+</body></html>`;
+    }
+
+    openPrintWindow(html) {
+        const w = window.open('', '_blank');
+        if (!w) {
+            alert('חלון ההדפסה נחסם. אפשר חלונות קופצים לאתר ונסה שוב.');
+            return;
+        }
+        w.document.write(html);
+        w.document.close();
+        w.focus();
+        setTimeout(() => { try { w.print(); } catch (e) { /* user can print manually */ } }, 350);
+    }
+
+    // ===========================
     // Approvals (Chef)
     // ===========================
 
@@ -2225,6 +2325,7 @@ class OrderSystem {
             if (item.createdByName) {
                 html += `<div class="history-items">👤 הוזמן ע"י: ${item.createdByName}${item.approvedByName ? ` · אושר ע"י: ${item.approvedByName}` : ''}</div>`;
             }
+            html += `<button class="btn btn-small" style="background:#2196F3;color:#fff;margin-top:8px;" onclick="orderSystem.printHistoryOrder('${item.id}')">🖨️ הדפס / שמור</button>`;
 
             historyCard.innerHTML = html;
             container.appendChild(historyCard);
