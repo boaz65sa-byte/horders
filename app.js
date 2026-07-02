@@ -514,6 +514,7 @@ class OrderSystem {
         this.pendingImageProductId = null;
         this.sharedBankActive = false; // becomes true once the KV-backed shared bank is reachable
         this._sharedSaveTimer = null;
+        this._dirtyKeys = new Set(); // which collections changed since the last shared save
         this.init();
     }
 
@@ -579,8 +580,8 @@ class OrderSystem {
 
     saveData(key, data) {
         localStorage.setItem(key, JSON.stringify(data));
-        // Mirror shared collections + config objects to the KV bank
-        if (SHARED_KEYS.includes(key) || SHARED_OBJECT_KEYS.includes(key)) this.scheduleSharedSave();
+        // Mirror shared collections + config objects to the KV bank (only the key that changed)
+        if (SHARED_KEYS.includes(key) || SHARED_OBJECT_KEYS.includes(key)) this.scheduleSharedSave(key);
     }
 
     // localStorage-only write (used when adopting server data, to avoid an echo POST)
@@ -604,8 +605,11 @@ class OrderSystem {
             const data = await r.json();
             this.sharedBankActive = true;
 
+            // If an order is mid-build, don't swap products/suppliers under it (would break the DOM rows)
+            const orderInProgress = this.currentOrder.length > 0 || this.manualItems.length > 0;
             // Adopt whichever shared collections the server already has (server = source of truth)
             SHARED_KEYS.forEach(k => {
+                if (orderInProgress && (k === 'products' || k === 'suppliers')) return;
                 if (Array.isArray(data[k])) {
                     this[k] = data[k];
                     this.saveLocal(k, data[k]);
@@ -655,17 +659,19 @@ class OrderSystem {
         }
     }
 
-    scheduleSharedSave() {
+    scheduleSharedSave(key) {
         if (!this.sharedBankActive) return;
+        if (key) this._dirtyKeys.add(key);
         clearTimeout(this._sharedSaveTimer);
         this._sharedSaveTimer = setTimeout(() => this.saveSharedBank(), 800);
     }
 
+    // POST only the collections that actually changed — never clobber untouched keys on the server
     saveSharedBank() {
-        if (!this.sharedBankActive) return;
+        if (!this.sharedBankActive || this._dirtyKeys.size === 0) return;
         const payload = {};
-        SHARED_KEYS.forEach(k => { payload[k] = this[k]; });
-        SHARED_OBJECT_KEYS.forEach(k => { payload[k] = this[k]; });
+        this._dirtyKeys.forEach(k => { payload[k] = this[k]; });
+        this._dirtyKeys.clear();
         fetch('/api/data', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1012,8 +1018,8 @@ class OrderSystem {
         const price = parseFloat(document.getElementById('product-price').value);
         const unit = document.getElementById('product-unit').value;
 
-        if (!supplierId || !name || !price) {
-            alert('נא למלא את כל השדות');
+        if (!supplierId || !name || isNaN(price) || price < 0) {
+            alert('נא למלא ספק, שם ומחיר תקין (0 ומעלה)');
             return;
         }
 
@@ -1842,7 +1848,7 @@ class OrderSystem {
         const dateStr = now.toLocaleDateString('he-IL');
         const timeStr = now.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
         
-        const deliveryDateFormatted = new Date(deliveryDate).toLocaleDateString('he-IL');
+        const deliveryDateFormatted = deliveryDate ? new Date(deliveryDate).toLocaleDateString('he-IL') : '—';
 
         let message = `היי ${supplier.name}! 🛒\n\n`;
         message += `הזמנה חדשה - ${dateStr} ${timeStr}\n`;
@@ -2359,7 +2365,7 @@ class OrderSystem {
             const date = new Date(item.date);
             const dateStr = date.toLocaleDateString('he-IL');
             const timeStr = date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
-            const deliveryDateStr = new Date(item.deliveryDate).toLocaleDateString('he-IL');
+            const deliveryDateStr = item.deliveryDate ? new Date(item.deliveryDate).toLocaleDateString('he-IL') : '—';
 
             const historyCard = document.createElement('div');
             historyCard.className = 'history-item';
@@ -2412,8 +2418,10 @@ class OrderSystem {
     // ===========================
 
     loadPreferences() {
-        document.getElementById('show-prices').checked = this.preferences.showPrices;
-        document.querySelector(`input[name="send-method"][value="${this.preferences.sendMethod}"]`).checked = true;
+        const showPrices = document.getElementById('show-prices');
+        if (showPrices) showPrices.checked = this.preferences.showPrices;
+        const radio = document.querySelector(`input[name="send-method"][value="${this.preferences.sendMethod}"]`);
+        if (radio) radio.checked = true;
     }
 
     updatePreference(key, value) {
