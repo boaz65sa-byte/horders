@@ -1229,9 +1229,9 @@ class OrderSystem {
         let html = `
             <div class="inventory-row inventory-head">
                 <span class="inv-name">מוצר</span>
-                <span class="inv-col">כמות קיימת</span>
-                <span class="inv-col">כמות נדרשת</span>
-                <span class="inv-col">חסר</span>
+                <span class="inv-col">כמות קיים</span>
+                <span class="inv-col">מלאי פתיחה</span>
+                <span class="inv-col">כמות להזמנה</span>
             </div>
         `;
         products.forEach(product => {
