@@ -749,6 +749,19 @@ class OrderSystem {
         const saveApprovalPhonesBtn = document.getElementById('save-approval-phones-btn');
         if (saveApprovalPhonesBtn) saveApprovalPhonesBtn.addEventListener('click', () => this.saveApprovalSettings());
 
+        // Inventory tab
+        const inventorySupplierSelect = document.getElementById('inventory-supplier-select');
+        if (inventorySupplierSelect) inventorySupplierSelect.addEventListener('change', (e) => this.renderInventory(e.target.value));
+
+        const inventorySearch = document.getElementById('inventory-search');
+        if (inventorySearch) inventorySearch.addEventListener('input', (e) => this.filterInventory(e.target.value));
+
+        const saveInventoryBtn = document.getElementById('save-inventory-btn');
+        if (saveInventoryBtn) saveInventoryBtn.addEventListener('click', () => this.saveInventory());
+
+        const createOrderFromShortageBtn = document.getElementById('create-order-from-shortage-btn');
+        if (createOrderFromShortageBtn) createOrderFromShortageBtn.addEventListener('click', () => this.createOrderFromShortage());
+
         // Products tab
         const addProductBtn = document.getElementById('add-product-btn');
         if (addProductBtn) addProductBtn.addEventListener('click', () => this.addProduct());
@@ -815,6 +828,11 @@ class OrderSystem {
             this.refreshPendingFromServer(); // pull latest pending orders from other devices
         }
         if (tabName === 'products') this.renderAllProducts();
+        if (tabName === 'inventory') {
+            this.loadSupplierSelects(); // keep the inventory supplier list in sync
+            const invSel = document.getElementById('inventory-supplier-select');
+            if (invSel && invSel.value) this.renderInventory(invSel.value);
+        }
     }
 
     // ===========================
@@ -870,7 +888,8 @@ class OrderSystem {
         const selects = [
             document.getElementById('supplier-select'),
             document.getElementById('product-supplier-select'),
-            document.getElementById('excel-supplier-select')
+            document.getElementById('excel-supplier-select'),
+            document.getElementById('inventory-supplier-select')
         ];
 
         selects.forEach(select => {
@@ -1172,6 +1191,170 @@ class OrderSystem {
 
     closeProductEditModal() {
         document.getElementById('edit-product-modal').classList.remove('active');
+    }
+
+    // ===========================
+    // Inventory Management (מלאי)
+    // ===========================
+
+    // Shortage for a product = max(0, parLevel - stockQty). Missing fields treated as 0.
+    productShortage(product) {
+        const stock = Number(product.stockQty) || 0;
+        const par = Number(product.parLevel) || 0;
+        return Math.max(0, par - stock);
+    }
+
+    // Render the inventory rows for a single supplier (never all 1800 products at once).
+    renderInventory(supplierId) {
+        const container = document.getElementById('inventory-list');
+        const controls = document.getElementById('inventory-controls');
+        if (!container) return;
+
+        if (!supplierId) {
+            container.innerHTML = '';
+            if (controls) controls.style.display = 'none';
+            return;
+        }
+
+        const isAdmin = typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.role === 'admin';
+        const products = this.products.filter(p => p.supplierId === supplierId);
+
+        if (controls) controls.style.display = products.length ? 'block' : 'none';
+
+        if (products.length === 0) {
+            container.innerHTML = '<p class="alert alert-info">אין מוצרים לספק זה. הוסף מוצרים בטאב "מוצרים"</p>';
+            return;
+        }
+
+        let html = `
+            <div class="inventory-row inventory-head">
+                <span class="inv-name">מוצר</span>
+                <span class="inv-col">כמות קיימת</span>
+                <span class="inv-col">כמות נדרשת</span>
+                <span class="inv-col">חסר</span>
+            </div>
+        `;
+        products.forEach(product => {
+            const stock = Number(product.stockQty) || 0;
+            const par = Number(product.parLevel) || 0;
+            const shortage = Math.max(0, par - stock);
+            const parAttrs = isAdmin ? '' : 'disabled';
+            html += `
+                <div class="inventory-row" data-name="${product.name.toLowerCase()}">
+                    <span class="inv-name">${product.name}</span>
+                    <span class="inv-col">
+                        <input type="number" class="input-field inv-input inv-stock" data-product-id="${product.id}" min="0" step="0.5" value="${stock}" inputmode="decimal"
+                               onchange="orderSystem.updateInventoryRow('${product.id}')" oninput="orderSystem.updateInventoryRow('${product.id}')">
+                    </span>
+                    <span class="inv-col">
+                        <input type="number" class="input-field inv-input inv-par" data-product-id="${product.id}" min="0" step="0.5" value="${par}" inputmode="decimal" ${parAttrs}
+                               onchange="orderSystem.updateInventoryRow('${product.id}')" oninput="orderSystem.updateInventoryRow('${product.id}')">
+                    </span>
+                    <span class="inv-col inv-shortage ${shortage > 0 ? 'has-shortage' : ''}" data-shortage-id="${product.id}">${shortage}</span>
+                </div>
+            `;
+        });
+        container.innerHTML = html;
+
+        // Reset search filter for the newly selected supplier
+        const search = document.getElementById('inventory-search');
+        if (search) search.value = '';
+        this.updateInventorySummary(supplierId);
+    }
+
+    // Recompute a single row's shortage highlight as the user types (no save yet).
+    updateInventoryRow(productId) {
+        const stockInput = document.querySelector(`.inv-stock[data-product-id="${productId}"]`);
+        const parInput = document.querySelector(`.inv-par[data-product-id="${productId}"]`);
+        const shortageCell = document.querySelector(`[data-shortage-id="${productId}"]`);
+        if (!stockInput || !parInput || !shortageCell) return;
+
+        const stock = Math.max(0, parseFloat(stockInput.value) || 0);
+        const par = Math.max(0, parseFloat(parInput.value) || 0);
+        const shortage = Math.max(0, par - stock);
+        shortageCell.textContent = shortage;
+        shortageCell.classList.toggle('has-shortage', shortage > 0);
+
+        const supplierId = document.getElementById('inventory-supplier-select').value;
+        this.updateInventorySummary(supplierId);
+    }
+
+    // Filter the visible inventory rows by product name.
+    filterInventory(term) {
+        const query = (term || '').trim().toLowerCase();
+        document.querySelectorAll('#inventory-list .inventory-row:not(.inventory-head)').forEach(row => {
+            const name = row.dataset.name || '';
+            row.style.display = (!query || name.includes(query)) ? '' : 'none';
+        });
+    }
+
+    // "X פריטים בחוסר" summary for the selected supplier (reads live input values).
+    updateInventorySummary(supplierId) {
+        const el = document.getElementById('inventory-shortage-summary');
+        if (!el) return;
+        let shortItems = 0;
+        this.products.filter(p => p.supplierId === supplierId).forEach(product => {
+            const stockInput = document.querySelector(`.inv-stock[data-product-id="${product.id}"]`);
+            const parInput = document.querySelector(`.inv-par[data-product-id="${product.id}"]`);
+            const stock = stockInput ? (parseFloat(stockInput.value) || 0) : (Number(product.stockQty) || 0);
+            const par = parInput ? (parseFloat(parInput.value) || 0) : (Number(product.parLevel) || 0);
+            if (Math.max(0, par - stock) > 0) shortItems++;
+        });
+        el.textContent = `${shortItems} פריטים בחוסר`;
+        el.classList.toggle('has-shortage', shortItems > 0);
+    }
+
+    // Persist every inventory input into products, then sync to the shared bank.
+    // Non-admins cannot change par level (their inputs are disabled, so they're read-only anyway).
+    saveInventory() {
+        const isAdmin = typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.role === 'admin';
+        document.querySelectorAll('#inventory-list .inv-stock').forEach(input => {
+            const product = this.products.find(p => p.id === input.dataset.productId);
+            if (product) product.stockQty = Math.max(0, parseFloat(input.value) || 0);
+        });
+        if (isAdmin) {
+            document.querySelectorAll('#inventory-list .inv-par').forEach(input => {
+                const product = this.products.find(p => p.id === input.dataset.productId);
+                if (product) product.parLevel = Math.max(0, parseFloat(input.value) || 0);
+            });
+        }
+
+        this.saveData('products', this.products);
+        this.showAlert('✅ המלאי נשמר', 'success');
+    }
+
+    // Collect shortages for the selected supplier and pre-fill an order with those amounts.
+    createOrderFromShortage() {
+        const supplierId = document.getElementById('inventory-supplier-select').value;
+        if (!supplierId) { alert('נא לבחור ספק'); return; }
+
+        // Save first so shortages reflect the latest edited values
+        this.saveInventory();
+
+        const shortages = this.products
+            .filter(p => p.supplierId === supplierId)
+            .map(p => ({ id: p.id, shortage: this.productShortage(p) }))
+            .filter(x => x.shortage > 0);
+
+        if (shortages.length === 0) {
+            this.showAlert('אין מוצרים בחוסר לספק זה 👍', 'info');
+            return;
+        }
+
+        // Switch to the order screen and select this supplier
+        this.switchTab('order');
+        const orderSelect = document.getElementById('supplier-select');
+        orderSelect.value = supplierId;
+        this.onSupplierChange(supplierId);
+
+        // Pre-fill the order quantities with the shortage amounts
+        shortages.forEach(({ id, shortage }) => {
+            const input = document.querySelector(`.quantity-input[data-product-id="${id}"]`);
+            if (input) input.value = shortage;
+        });
+        this.updateOrderSummary();
+
+        this.showAlert(`🛒 מולאו ${shortages.length} פריטים בחוסר. בדוק ושלח לאישור.`, 'success');
     }
 
     // ===========================

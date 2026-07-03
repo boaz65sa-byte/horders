@@ -791,6 +791,105 @@ label {
     padding: 6px 10px;
 }
 
+/* Inventory (מלאי) */
+.inventory-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.inventory-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.inventory-buttons .btn {
+    width: auto;
+    margin: 0;
+}
+
+.inventory-summary {
+    font-weight: 700;
+    color: #555;
+}
+
+.inventory-summary.has-shortage {
+    color: #e53935;
+}
+
+.inventory-list {
+    margin-top: 10px;
+}
+
+.inventory-row {
+    display: grid;
+    grid-template-columns: 1.6fr 1fr 1fr 0.7fr;
+    align-items: center;
+    gap: 8px;
+    background: #f9f9f9;
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin-bottom: 6px;
+}
+
+.inventory-row.inventory-head {
+    background: #ffe0b2;
+    font-weight: 700;
+    color: #333;
+    position: sticky;
+    top: 0;
+}
+
+.inventory-row .inv-name {
+    font-weight: 600;
+    color: #333;
+}
+
+.inventory-row .inv-col {
+    text-align: center;
+}
+
+.inv-input.input-field {
+    margin: 0;
+    padding: 8px;
+    text-align: center;
+}
+
+.inv-input:disabled {
+    background: #eee;
+    color: #777;
+    cursor: not-allowed;
+}
+
+.inv-shortage {
+    font-weight: 700;
+    color: #4CAF50;
+}
+
+.inv-shortage.has-shortage {
+    color: #fff;
+    background: #e53935;
+    border-radius: 6px;
+    padding: 4px 0;
+}
+
+@media (max-width: 600px) {
+    .inventory-row {
+        grid-template-columns: 1.4fr 1fr 1fr 0.7fr;
+        gap: 4px;
+        padding: 8px 6px;
+        font-size: 13px;
+    }
+    .inv-input.input-field {
+        padding: 6px 2px;
+        font-size: 14px;
+    }
+}
+
 /* Approvals (Chef) */
 .approval-item-card {
     background: #f5f5f5;
