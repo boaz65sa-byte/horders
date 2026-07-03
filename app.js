@@ -142,7 +142,7 @@ const PRODUCT_CATALOG = [
 // ===========================
 // Staff (named identities picked at login)
 // ===========================
-const DEFAULT_STAFF = ['שף ראשי', 'סגן שף', 'שף חלבי', 'שף בשרי', 'עובד מטבח'];
+const DEFAULT_STAFF = ['שף ראשי', 'סגן שף', 'שף חלבי', 'שף בשרי', 'מחסנאי', 'עובד מטבח'];
 
 // Reads the staff list from localStorage, or returns sensible defaults (not persisted)
 function loadStaff() {
