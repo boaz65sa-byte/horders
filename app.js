@@ -154,7 +154,7 @@ function loadStaff() {
 }
 
 // Array collections mirrored to the shared (KV) bank across devices
-const SHARED_KEYS = ['products', 'suppliers', 'staff', 'pendingOrders', 'history'];
+const SHARED_KEYS = ['products', 'suppliers', 'staff', 'pendingOrders', 'history', 'needs'];
 // Config objects mirrored to the shared bank (phones, procurement email)
 const SHARED_OBJECT_KEYS = ['approvalSettings'];
 
@@ -495,6 +495,7 @@ class OrderSystem {
         this.history = this.loadData('history') || [];
         this.pendingOrders = this.loadData('pendingOrders') || [];
         this.staff = this.loadData('staff') || loadStaff();
+        this.needs = this.loadData('needs') || []; // reported shortages (flagged by role-holders)
         this.approvalSettings = this.loadData('approvalSettings') || {
             chefPhone: '',
             managerPhone: '',
@@ -537,6 +538,7 @@ class OrderSystem {
         this.loadApprovalSettings();
         this.setDefaultDeliveryDate();
         this.updateApprovalsBadge();
+        this.updateNeedsBadge();
         this.renderWeekdayPicker('supplier-order-days', []);
         this.checkOrderReminders();
         this.setupPush();
@@ -650,6 +652,8 @@ class OrderSystem {
         this.loadHistory();
         this.renderApprovals();
         this.updateApprovalsBadge();
+        this.renderNeeds();
+        this.updateNeedsBadge();
         this.loadApprovalSettings(); // repopulate phone/procurement inputs from adopted settings
         if (typeof authSystem !== 'undefined' && authSystem) authSystem.populateLoginNames();
         // Re-render the order products only if the user hasn't started an order (don't wipe quantities)
@@ -833,6 +837,7 @@ class OrderSystem {
             const invSel = document.getElementById('inventory-supplier-select');
             if (invSel && invSel.value) this.renderInventory(invSel.value);
         }
+        if (tabName === 'needs') this.renderNeeds();
     }
 
     // ===========================
@@ -1241,7 +1246,7 @@ class OrderSystem {
             const parAttrs = isAdmin ? '' : 'disabled';
             html += `
                 <div class="inventory-row" data-name="${product.name.toLowerCase()}">
-                    <span class="inv-name">${product.name}</span>
+                    <span class="inv-name">${product.name} <button class="inv-flag-btn" onclick="orderSystem.markShortage('${product.id}')" type="button" title="סמן חסר">🚩</button></span>
                     <span class="inv-col">
                         <input type="number" class="input-field inv-input inv-stock" data-product-id="${product.id}" min="0" step="0.5" value="${stock}" inputmode="decimal"
                                onchange="orderSystem.updateInventoryRow('${product.id}')" oninput="orderSystem.updateInventoryRow('${product.id}')">
@@ -1355,6 +1360,135 @@ class OrderSystem {
         this.updateOrderSummary();
 
         this.showAlert(`🛒 מולאו ${shortages.length} פריטים בחוסר. בדוק ושלח לאישור.`, 'success');
+    }
+
+    // ===========================
+    // Shortage reporting (🚩 חסר) — role-holders flag needs → consolidated list → order
+    // ===========================
+
+    // Flag a product as missing/needed. qty is optional (prompt allows empty).
+    markShortage(productId) {
+        const product = this.products.find(p => p.id === productId);
+        if (!product) return;
+
+        const ans = prompt(`כמה חסר מ"${product.name}"? (אפשר להשאיר ריק)`, '');
+        if (ans === null) return; // cancelled
+        const qty = ans.trim() === '' ? null : (parseFloat(ans) || null);
+
+        const supplier = this.suppliers.find(s => s.id === product.supplierId);
+        const reportedBy = (typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.name) ? authSystem.currentUser.name : '';
+
+        // If already reported, update the quantity instead of duplicating
+        const existing = this.needs.find(n => n.productId === productId);
+        if (existing) {
+            existing.qty = qty;
+            existing.reportedBy = reportedBy;
+            existing.date = new Date().toISOString();
+        } else {
+            this.needs.push({
+                id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
+                productId,
+                name: product.name,
+                supplierId: product.supplierId,
+                supplierName: supplier ? supplier.name : 'ללא ספק',
+                qty,
+                reportedBy,
+                date: new Date().toISOString()
+            });
+        }
+
+        this.saveData('needs', this.needs);
+        this.updateNeedsBadge();
+        this.showAlert(`🚩 "${product.name}" סומן כחסר`, 'success');
+    }
+
+    updateNeedsBadge() {
+        const badge = document.getElementById('needs-badge');
+        if (!badge) return;
+        const count = this.needs.length;
+        badge.textContent = count;
+        badge.style.display = count > 0 ? 'inline-block' : 'none';
+    }
+
+    renderNeeds() {
+        const container = document.getElementById('needs-list');
+        if (!container) return;
+
+        if (this.needs.length === 0) {
+            container.innerHTML = '<p class="alert alert-info">אין חוסרים מדווחים כרגע 👍</p>';
+            return;
+        }
+
+        // Group by supplier
+        const groups = {};
+        this.needs.forEach(n => {
+            if (!groups[n.supplierId]) groups[n.supplierId] = { name: n.supplierName, items: [] };
+            groups[n.supplierId].items.push(n);
+        });
+
+        let html = '';
+        Object.keys(groups).forEach(supId => {
+            const g = groups[supId];
+            let rows = '';
+            g.items.forEach(n => {
+                const qtyStr = (n.qty !== null && n.qty !== undefined) ? `${n.qty}` : '—';
+                const by = n.reportedBy ? ` · דווח ע"י ${n.reportedBy}` : '';
+                rows += `
+                    <div class="need-row">
+                        <span class="need-name">${n.name}</span>
+                        <span class="need-qty">כמות: ${qtyStr}</span>
+                        <span class="need-by">${by}</span>
+                        <button class="btn btn-secondary btn-small" onclick="orderSystem.removeNeed('${n.id}')">✖</button>
+                    </div>`;
+            });
+            html += `
+                <div class="need-group">
+                    <div class="need-group-head">
+                        <span>🛒 ${g.name} <span class="need-count">(${g.items.length})</span></span>
+                    </div>
+                    ${rows}
+                    <div class="need-group-actions">
+                        <button class="btn btn-primary btn-small" onclick="orderSystem.createOrderFromNeeds('${supId}')">🛒 צור הזמנה</button>
+                        <button class="btn btn-secondary btn-small" onclick="orderSystem.clearSupplierNeeds('${supId}')">🗑️ נקה ספק</button>
+                    </div>
+                </div>`;
+        });
+        container.innerHTML = html;
+    }
+
+    removeNeed(needId) {
+        this.needs = this.needs.filter(n => n.id !== needId);
+        this.saveData('needs', this.needs);
+        this.renderNeeds();
+        this.updateNeedsBadge();
+    }
+
+    clearSupplierNeeds(supplierId) {
+        if (!confirm('לנקות את כל החוסרים של הספק?')) return;
+        this.needs = this.needs.filter(n => n.supplierId !== supplierId);
+        this.saveData('needs', this.needs);
+        this.renderNeeds();
+        this.updateNeedsBadge();
+    }
+
+    // Merge a supplier's reported needs into an order (qty defaults to 1 when unspecified)
+    createOrderFromNeeds(supplierId) {
+        const items = this.needs.filter(n => n.supplierId === supplierId);
+        if (items.length === 0) return;
+
+        this.switchTab('order');
+        const orderSelect = document.getElementById('supplier-select');
+        orderSelect.value = supplierId;
+        this.onSupplierChange(supplierId);
+
+        let filled = 0;
+        items.forEach(n => {
+            const input = document.querySelector(`.quantity-input[data-product-id="${n.productId}"]`);
+            if (input) { input.value = (n.qty !== null && n.qty !== undefined) ? n.qty : 1; filled++; }
+        });
+        this.updateOrderSummary();
+
+        this.showAlert(`🛒 מולאו ${filled} פריטים מרשימת החוסרים. בדוק, השלם כמויות, ושלח לאישור.`, 'success');
     }
 
     // ===========================
@@ -1835,6 +1969,7 @@ class OrderSystem {
                         <option value="ארגז" ${product.unit === 'ארגז' ? 'selected' : ''}>ארגז</option>
                         <option value="קרטון" ${product.unit === 'קרטון' ? 'selected' : ''}>קרטון</option>
                     </select>
+                    <button class="flag-shortage-btn" onclick="orderSystem.markShortage('${product.id}')" type="button">🚩 חסר</button>
                 </div>
             `;
             grid.appendChild(card);

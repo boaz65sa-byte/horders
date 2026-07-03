@@ -71,6 +71,7 @@
         <nav class="tabs">
             <button class="tab-btn active" data-tab="order">🛍️ הזמנה</button>
             <button class="tab-btn" data-tab="inventory">📦 מלאי</button>
+            <button class="tab-btn" data-tab="needs">🚩 חוסרים<span id="needs-badge" class="tab-badge" style="display: none;">0</span></button>
             <button class="tab-btn" data-tab="products">📦 מוצרים</button>
             <button class="tab-btn" data-tab="suppliers">👥 ספקים</button>
             <button class="tab-btn" data-tab="approvals" id="approvals-tab-btn" style="display: none;">✅ אישורים<span id="approvals-badge" class="tab-badge" style="display: none;">0</span></button>
@@ -179,6 +180,15 @@
                 </div>
 
                 <div id="inventory-list" class="inventory-list"></div>
+            </div>
+        </div>
+
+        <!-- Shortages (needs) Tab -->
+        <div class="tab-content" id="needs-tab">
+            <div class="section">
+                <h2>🚩 רשימת חוסרים</h2>
+                <p class="help-text">כל מוצר שסומן "🚩 חסר" (במלאי או בהזמנה) נאסף לכאן, מקובץ לפי ספק. לחיצה על "צור הזמנה" ממלאת את מסך ההזמנה מהחוסרים.</p>
+                <div id="needs-list"></div>
             </div>
         </div>
 

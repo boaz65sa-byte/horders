@@ -1170,3 +1170,64 @@ label {
     cursor: pointer;
     font-size: 16px;
 }
+
+/* Shortage flag (🚩 חסר) + needs list */
+.flag-shortage-btn {
+    width: 100%;
+    margin-top: 4px;
+    padding: 7px;
+    border: none;
+    border-radius: 8px;
+    background: #fff3e0;
+    color: #E65100;
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
+    border: 1px solid #ffcc80;
+}
+.flag-shortage-btn:active { transform: scale(0.96); }
+
+.inv-flag-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 15px;
+    padding: 0 2px;
+}
+
+.need-group {
+    background: #fff8f0;
+    border: 1px solid #ffe0b2;
+    border-right: 4px solid #FF9800;
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+}
+.need-group-head {
+    font-weight: 700;
+    font-size: 16px;
+    color: #333;
+    margin-bottom: 8px;
+}
+.need-count { color: #999; font-size: 13px; font-weight: 400; }
+.need-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #fff;
+    border: 1px solid #f0e0d0;
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
+}
+.need-name { flex: 1; font-weight: 600; color: #333; min-width: 120px; }
+.need-qty { color: #E65100; font-weight: 600; font-size: 13px; }
+.need-by { color: #999; font-size: 12px; }
+.need-row .btn-small { width: auto; margin: 0; padding: 5px 10px; }
+.need-group-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+.need-group-actions .btn { width: auto; margin: 0; flex: 1; }
