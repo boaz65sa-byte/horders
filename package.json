@@ -4,6 +4,7 @@
   "private": true,
   "description": "Supplier ordering system with chef-approval flow and order-day push reminders",
   "dependencies": {
+    "nodemailer": "^6.10.1",
     "web-push": "^3.6.7"
   }
 }

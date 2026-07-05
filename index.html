@@ -94,6 +94,7 @@
                 <select id="supplier-select" class="input-field">
                     <option value="">-- בחר ספק --</option>
                 </select>
+                <div id="supplier-email-warning" class="alert alert-info" style="display: none; margin-top: 10px;"></div>
             </div>
 
             <!-- Delivery Date -->
@@ -133,6 +134,9 @@
 
             <!-- Shipping Settings -->
             <div class="section" id="shipping-settings" style="display: none;">
+                <h3>🛒 רשימת קניות לספק</h3>
+                <div class="order-summary" id="order-summary"></div>
+
                 <h3>הגדרות שליחה:</h3>
                 
                 <div class="shipping-options">
@@ -156,8 +160,6 @@
                         <span>☑️ הצג מחירים בהודעה</span>
                     </label>
                 </div>
-
-                <div class="order-summary" id="order-summary"></div>
 
                 <button id="send-order-btn" class="btn btn-primary">📤 שלח לאישור השף</button>
                 <button id="print-order-btn" class="btn btn-secondary" style="background:#2196F3;">🖨️ הדפס / שמור הזמנה</button>
@@ -362,7 +364,14 @@
                     <input type="tel" id="manager-phone-input" class="input-field" placeholder="לדוגמה: 052-7654321">
 
                     <label for="procurement-email-input">📧 מייל רכש (העתק/CC בכל הזמנה שנשלחת במייל):</label>
-                    <input type="email" id="procurement-email-input" class="input-field" placeholder="לדוגמה: rechesh@example.com">
+                    <input type="email" id="procurement-email-input" class="input-field" placeholder="לדוגמה: rechesh@yourbusiness.com">
+                    <p class="help-text">
+                        <strong>חשוב:</strong> ודא שלכל ספק יש מייל אמיתי (לא @example.com) בטאב "ספקים".<br>
+                        <strong>הגדרת שרת (Vercel):</strong> מומלץ Gmail — <code>SMTP_HOST=smtp.gmail.com</code>,
+                        <code>SMTP_USER</code>, <code>SMTP_PASS</code> (סיסמת אפליקציה), <code>EMAIL_FROM</code>.<br>
+                        לחלופין Resend — חייב דומיין מאומת; <code>onboarding@resend.dev</code> לא שולח לספקים.
+                    </p>
+                    <button type="button" id="test-email-btn" class="btn btn-secondary">📧 שלח מייל בדיקה</button>
 
                     <button id="save-approval-phones-btn" class="btn btn-primary">💾 שמור הגדרות</button>
                 </div>

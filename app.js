@@ -353,6 +353,7 @@ class AuthSystem {
                 if (typeof orderSystem !== 'undefined' && orderSystem) {
                     orderSystem.checkOrderReminders();
                     orderSystem.renderDashboard();
+                    orderSystem.updateSendButtonLabel();
                 }
             }
         }
@@ -742,7 +743,7 @@ class OrderSystem {
         const clearOrderBtn = document.getElementById('clear-order-btn');
         
         if (supplierSelect) supplierSelect.addEventListener('change', (e) => this.onSupplierChange(e.target.value));
-        if (sendOrderBtn) sendOrderBtn.addEventListener('click', () => this.submitForApproval());
+        if (sendOrderBtn) sendOrderBtn.addEventListener('click', () => this.submitOrder());
         if (clearOrderBtn) clearOrderBtn.addEventListener('click', () => this.clearOrder());
 
         const printOrderBtn = document.getElementById('print-order-btn');
@@ -779,6 +780,9 @@ class OrderSystem {
         // Approval flow phone numbers (settings)
         const saveApprovalPhonesBtn = document.getElementById('save-approval-phones-btn');
         if (saveApprovalPhonesBtn) saveApprovalPhonesBtn.addEventListener('click', () => this.saveApprovalSettings());
+
+        const testEmailBtn = document.getElementById('test-email-btn');
+        if (testEmailBtn) testEmailBtn.addEventListener('click', () => this.sendTestEmail());
 
         // Inventory tab
         const inventorySupplierSelect = document.getElementById('inventory-supplier-select');
@@ -892,6 +896,35 @@ class OrderSystem {
         if (sel) { sel.value = supplierId; this.onSupplierChange(supplierId); }
     }
 
+    // Global product search (across all suppliers) from the dashboard
+    globalSearch(query) {
+        const el = document.getElementById('global-search-results');
+        if (!el) return;
+        const q = (query || '').trim().toLowerCase();
+        if (q.length < 2) { el.innerHTML = ''; return; }
+
+        const supName = {};
+        this.suppliers.forEach(s => { supName[s.id] = s.name; });
+        const results = this.products.filter(p => p.name.toLowerCase().includes(q)).slice(0, 40);
+
+        if (!results.length) { el.innerHTML = '<p class="dash-empty">לא נמצאו מוצרים</p>'; return; }
+        el.innerHTML = results.map(p =>
+            `<div class="gsearch-row" onclick="orderSystem.goToOrderForProduct('${p.id}')">
+                <span class="gsearch-name">${p.name}</span>
+                <span class="gsearch-sup">${supName[p.supplierId] || 'ללא ספק'}</span>
+            </div>`
+        ).join('');
+    }
+
+    // Jump to the order screen for a product's supplier, filtered to that product
+    goToOrderForProduct(productId) {
+        const p = this.products.find(x => x.id === productId);
+        if (!p) return;
+        this.goToOrder(p.supplierId);
+        const ps = document.getElementById('product-search');
+        if (ps) { ps.value = p.name; this.filterProducts(p.name); }
+    }
+
     renderDashboard() {
         const el = document.getElementById('dashboard-content');
         if (!el) return;
@@ -920,6 +953,12 @@ class OrderSystem {
         el.innerHTML = `
             <h2>🏠 שלום${userName ? ' ' + userName : ''}!</h2>
             <p class="help-text">יום ${dayName} · ${new Date().toLocaleDateString('he-IL')}</p>
+
+            <div class="dash-block">
+                <h3>🔍 חיפוש מהיר בכל הספקים</h3>
+                <input type="text" id="global-search" class="input-field" placeholder="הקלד שם מוצר..." autocomplete="off" oninput="orderSystem.globalSearch(this.value)">
+                <div id="global-search-results"></div>
+            </div>
 
             <div class="dash-stats">
                 ${approvalsStat}
@@ -1033,7 +1072,7 @@ class OrderSystem {
                     </div>
                 </div>
                 <div class="supplier-info">📞 ${supplier.phone}</div>
-                <div class="supplier-info">📧 ${supplier.email}</div>
+                <div class="supplier-info">📧 ${supplier.email || '—'}${this.isPlaceholderEmail(supplier.email) ? ' <span style="color:#e65100;font-weight:700">⚠️ עדכן למייל אמיתי</span>' : ''}</div>
                 <div class="supplier-info">🏷️ ${supplier.category}</div>
                 ${supplier.orderDays && supplier.orderDays.length ? `<div class="supplier-info">📅 ימי הזמנה: ${this.formatOrderDays(supplier.orderDays)}</div>` : ''}
             `;
@@ -1107,6 +1146,7 @@ class OrderSystem {
         this.loadSupplierSelects();
         this.loadSuppliersDisplay();
         this.closeEditModal();
+        this.updateSupplierEmailWarning();
         this.refreshPushSchedule();
 
         this.showAlert('הספק עודכן בהצלחה! ✅', 'success');
@@ -1453,10 +1493,9 @@ class OrderSystem {
         orderSelect.value = supplierId;
         this.onSupplierChange(supplierId);
 
-        // Pre-fill the order quantities with the shortage amounts
+        // Pre-fill the cart with the shortage amounts
         shortages.forEach(({ id, shortage }) => {
-            const input = document.querySelector(`.quantity-input[data-product-id="${id}"]`);
-            if (input) input.value = shortage;
+            this.addProductToCart(id, shortage);
         });
         this.updateOrderSummary();
 
@@ -1584,8 +1623,8 @@ class OrderSystem {
 
         let filled = 0;
         items.forEach(n => {
-            const input = document.querySelector(`.quantity-input[data-product-id="${n.productId}"]`);
-            if (input) { input.value = (n.qty !== null && n.qty !== undefined) ? n.qty : 1; filled++; }
+            const qty = (n.qty !== null && n.qty !== undefined) ? n.qty : 1;
+            if (this.addProductToCart(n.productId, qty)) filled++;
         });
         this.updateOrderSummary();
 
@@ -2022,9 +2061,12 @@ class OrderSystem {
     }
 
     onSupplierChange(supplierId) {
-        // Reset ad-hoc manual items whenever the supplier changes
+        // Reset cart and ad-hoc manual items whenever the supplier changes
+        this.currentOrder = [];
         this.manualItems = [];
         this.renderManualItems();
+        this.updateOrderSummary();
+        this.updateSendButtonLabel();
 
         // Reset the search box
         const searchInput = document.getElementById('product-search');
@@ -2054,6 +2096,37 @@ class OrderSystem {
             const hasPrev = supplier && this.history.some(h => h.supplier === supplier.name);
             repeatBtn.style.display = hasPrev ? 'block' : 'none';
         }
+
+        this.updateSupplierEmailWarning();
+    }
+
+    updateSupplierEmailWarning() {
+        const box = document.getElementById('supplier-email-warning');
+        if (!box) return;
+
+        const supplierId = document.getElementById('supplier-select').value;
+        const supplier = this.suppliers.find(s => s.id === supplierId);
+        const wantsEmail = this.preferences.sendMethod === 'email' || this.preferences.sendMethod === 'both';
+
+        if (!supplier || !wantsEmail) {
+            box.style.display = 'none';
+            return;
+        }
+
+        const err = this.validateSupplierEmail(supplier.email);
+        if (err) {
+            box.className = 'alert alert-info';
+            box.style.display = 'block';
+            box.style.borderColor = '#e65100';
+            box.style.background = '#fff3e0';
+            box.innerHTML = `⚠️ ${err}<br><button type="button" class="btn btn-primary btn-small" style="margin-top:8px" onclick="orderSystem.editSupplier('${supplier.id}')">✏️ עדכן מייל ספק עכשיו</button>`;
+        } else {
+            box.className = 'alert alert-info';
+            box.style.display = 'block';
+            box.style.borderColor = '';
+            box.style.background = '';
+            box.textContent = `📧 ההזמנה תישלח ל: ${supplier.email}`;
+        }
     }
 
     // Pre-fill the order with the quantities from this supplier's most recent order
@@ -2068,7 +2141,7 @@ class OrderSystem {
             return;
         }
 
-        this.clearOrder(); // reset quantities + manual items first
+        this.clearOrder(); // reset cart + manual items first
 
         last.items.forEach(it => {
             if (it.manual) {
@@ -2076,18 +2149,16 @@ class OrderSystem {
                 return;
             }
             const prod = this.products.find(p => p.supplierId === supplierId && p.name === it.product);
-            const input = prod ? document.querySelector(`.quantity-input[data-product-id="${prod.id}"]`) : null;
-            if (input) {
-                input.value = it.quantity;
+            if (prod) {
+                this.addProductToCart(prod.id, it.quantity, it.unit);
             } else {
-                // product no longer in the catalog → keep it as a manual line
                 this.manualItems.push({ name: it.product, quantity: it.quantity, unit: it.unit, price: it.price || 0 });
             }
         });
 
         this.renderManualItems();
         this.updateOrderSummary();
-        this.showAlert(`🔁 נטענה ההזמנה האחרונה (${last.items.length} פריטים). עדכן כמויות ושלח לאישור.`, 'success');
+        this.showAlert(`🔁 נטענה ההזמנה האחרונה (${last.items.length} פריטים). בדוק את הסל ושלח.`, 'success');
     }
 
     filterProducts(term) {
@@ -2185,6 +2256,7 @@ class OrderSystem {
         products.forEach(product => {
             const card = document.createElement('div');
             card.className = 'product-card';
+            const inCart = this.getCartItemForProduct(product.id);
 
             const imageArea = product.image
                 ? `<div class="product-card-img has-img" data-image-id="${product.id}" style="background-image:url('${product.image}')">
@@ -2194,45 +2266,45 @@ class OrderSystem {
                        <span class="img-placeholder">📷<br>הוסף תמונה</span>
                    </div>`;
 
+            const unitOptions = ['ק״ג', 'יחידה', 'ארגז', 'קרטון'].map(u =>
+                `<option value="${u}" ${(inCart ? inCart.unit : product.unit) === u ? 'selected' : ''}>${u}</option>`
+            ).join('');
+
             card.innerHTML = `
                 ${imageArea}
                 <div class="product-card-body">
                     <div class="product-card-name">${product.name}</div>
                     <div class="product-card-price">₪${Number(product.price).toFixed(2)} / ${product.unit}</div>
-                    <div class="qty-stepper">
-                        <button class="qty-btn qty-minus" data-product-id="${product.id}" type="button">−</button>
-                        <input type="number" class="quantity-input" data-product-id="${product.id}" min="0" value="0" inputmode="decimal">
-                        <button class="qty-btn qty-plus" data-product-id="${product.id}" type="button">+</button>
+                    <div class="shortage-block">
+                        <label class="shortage-label">חוסר:</label>
+                        <div class="shortage-row">
+                            <input type="number" class="shortage-input" data-product-id="${product.id}" min="0" step="0.5" placeholder="כמות" inputmode="decimal">
+                            <select class="unit-select" data-product-id="${product.id}">${unitOptions}</select>
+                            <button class="update-shortage-btn" data-product-id="${product.id}" type="button">עדכן</button>
+                        </div>
                     </div>
-                    <select class="unit-select" data-product-id="${product.id}">
-                        <option value="ק״ג" ${product.unit === 'ק״ג' ? 'selected' : ''}>ק״ג</option>
-                        <option value="יחידה" ${product.unit === 'יחידה' ? 'selected' : ''}>יחידה</option>
-                        <option value="ארגז" ${product.unit === 'ארגז' ? 'selected' : ''}>ארגז</option>
-                        <option value="קרטון" ${product.unit === 'קרטון' ? 'selected' : ''}>קרטון</option>
-                    </select>
-                    <button class="flag-shortage-btn" onclick="orderSystem.markShortage('${product.id}')" type="button">🚩 חסר</button>
+                    ${inCart ? `<div class="in-cart-badge">✔ ברשימה: ${inCart.quantity} ${inCart.unit}</div>` : ''}
+                    <button class="flag-shortage-btn" onclick="orderSystem.markShortage('${product.id}')" type="button">🚩 דווח חוסר למחסנאי</button>
                 </div>
             `;
+            if (inCart) card.classList.add('selected');
             grid.appendChild(card);
         });
 
         container.innerHTML = '';
         container.appendChild(grid);
 
-        // Quantity input + unit listeners
-        grid.querySelectorAll('.quantity-input').forEach(input => {
-            input.addEventListener('input', () => this.updateOrderSummary());
-        });
-        grid.querySelectorAll('.unit-select').forEach(select => {
-            select.addEventListener('change', () => this.updateOrderSummary());
+        grid.querySelectorAll('.update-shortage-btn').forEach(btn => {
+            btn.addEventListener('click', () => this.updateProductShortage(btn.dataset.productId));
         });
 
-        // Quantity stepper buttons (+ / −)
-        grid.querySelectorAll('.qty-plus').forEach(btn => {
-            btn.addEventListener('click', () => this.stepQuantity(btn.dataset.productId, 1));
-        });
-        grid.querySelectorAll('.qty-minus').forEach(btn => {
-            btn.addEventListener('click', () => this.stepQuantity(btn.dataset.productId, -1));
+        grid.querySelectorAll('.shortage-input').forEach(input => {
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.updateProductShortage(input.dataset.productId);
+                }
+            });
         });
 
         // Image add / change (tap the image area)
@@ -2242,15 +2314,126 @@ class OrderSystem {
 
         document.getElementById('shipping-settings').style.display = 'block';
         this.updateOrderSummary();
+        this.updateSendButtonLabel();
     }
 
-    stepQuantity(productId, delta) {
-        const input = document.querySelector(`.quantity-input[data-product-id="${productId}"]`);
-        if (!input) return;
-        const current = parseFloat(input.value) || 0;
-        const next = Math.max(0, current + delta);
-        input.value = next;
+    getCartItemForProduct(productId) {
+        const product = this.products.find(p => p.id === productId);
+        if (!product) return null;
+        return this.currentOrder.find(
+            o => o.productId === productId || (o.product === product.name && !o.manual)
+        ) || null;
+    }
+
+    setProductInCart(productId, qty, unitOverride) {
+        const quantity = parseFloat(qty);
+        const product = this.products.find(p => p.id === productId);
+        if (!product) return false;
+
+        const unitSelect = document.querySelector(`.unit-select[data-product-id="${productId}"]`);
+        const selectedUnit = unitOverride || (unitSelect ? unitSelect.value : product.unit);
+
+        this.currentOrder = this.currentOrder.filter(
+            o => o.productId !== productId && !(o.product === product.name && !o.manual)
+        );
+
+        if (!quantity || quantity <= 0) {
+            this.syncProductCardFromCart(productId);
+            this.updateOrderSummary();
+            this.updateSendButtonLabel();
+            return false;
+        }
+
+        this.currentOrder.push({
+            productId: product.id,
+            product: product.name,
+            quantity: quantity,
+            unit: selectedUnit,
+            price: product.price,
+            total: product.price * quantity
+        });
+
+        this.syncProductCardFromCart(productId);
+        return true;
+    }
+
+    updateProductShortage(productId) {
+        const input = document.querySelector(`.shortage-input[data-product-id="${productId}"]`);
+        const raw = input ? input.value.trim() : '';
+        const qty = raw === '' ? 0 : parseFloat(raw);
+        const unitSelect = document.querySelector(`.unit-select[data-product-id="${productId}"]`);
+        const unit = unitSelect ? unitSelect.value : undefined;
+        const product = this.products.find(p => p.id === productId);
+        if (!product) return;
+
+        if (raw !== '' && (isNaN(qty) || qty < 0)) {
+            this.showAlert('נא להזין כמות תקינה', 'info');
+            return;
+        }
+
+        const hadItem = !!this.getCartItemForProduct(productId);
+        this.setProductInCart(productId, qty, unit);
         this.updateOrderSummary();
+        this.updateSendButtonLabel();
+
+        if (qty > 0) {
+            this.showAlert(`✅ ${product.name}: ${qty} ${unit} — עודכן ברשימה`, 'success');
+            if (input) input.value = '';
+        } else if (hadItem) {
+            this.showAlert(`${product.name} הוסר מרשימת הקניות`, 'info');
+        }
+    }
+
+    syncProductCardFromCart(productId) {
+        const input = document.querySelector(`.shortage-input[data-product-id="${productId}"]`);
+        const card = input ? input.closest('.product-card') : null;
+        if (!card) return;
+
+        const item = this.getCartItemForProduct(productId);
+        card.classList.toggle('selected', !!item);
+
+        let badge = card.querySelector('.in-cart-badge');
+        if (item) {
+            if (!badge) {
+                badge = document.createElement('div');
+                badge.className = 'in-cart-badge';
+                const block = card.querySelector('.shortage-block');
+                if (block) block.insertAdjacentElement('afterend', badge);
+            }
+            badge.textContent = `✔ ברשימה: ${item.quantity} ${item.unit}`;
+        } else if (badge) {
+            badge.remove();
+        }
+    }
+
+    // Bulk pre-fill: set quantity in cart (inventory / needs / repeat order)
+    addProductToCart(productId, qty, unitOverride) {
+        return this.setProductInCart(productId, qty, unitOverride);
+    }
+
+    removeCartItem(index) {
+        const item = this.currentOrder[index];
+        this.currentOrder.splice(index, 1);
+        if (item && item.productId) {
+            this.syncProductCardFromCart(item.productId);
+        } else if (item) {
+            const prod = this.products.find(p => p.name === item.product);
+            if (prod) this.syncProductCardFromCart(prod.id);
+        }
+        this.updateOrderSummary();
+        this.updateSendButtonLabel();
+    }
+
+    updateSendButtonLabel() {
+        const btn = document.getElementById('send-order-btn');
+        if (!btn) return;
+        const isAdmin = typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.role === 'admin';
+        const count = this.currentOrder.length + this.manualItems.length;
+        if (isAdmin) {
+            btn.textContent = count > 0 ? `✅ אשר ושלח לספק (${count})` : '✅ אשר ושלח לספק';
+        } else {
+            btn.textContent = count > 0 ? `📤 שלח לאישור השף (${count})` : '📤 שלח לאישור השף';
+        }
     }
 
     // ===========================
@@ -2329,43 +2512,51 @@ class OrderSystem {
 
     updateOrderSummary() {
         const container = document.getElementById('order-summary');
-        const quantities = document.querySelectorAll('.quantity-input');
-        
-        this.currentOrder = [];
         let total = 0;
 
-        quantities.forEach(input => {
-            const qty = parseFloat(input.value) || 0;
+        if (this.currentOrder.length === 0 && this.manualItems.length === 0) {
+            container.innerHTML = '<p class="cart-empty-hint">הרשימה ריקה — הזן חוסר ליד כל מוצר ולחץ "עדכן"</p>';
+            this.updateSendButtonLabel();
+            return;
+        }
 
-            // Visually mark the card as selected when a quantity is chosen
-            const card = input.closest('.product-card');
-            if (card) card.classList.toggle('selected', qty > 0);
-
-            if (qty > 0) {
-                const productId = input.dataset.productId;
-                const product = this.products.find(p => p.id === productId);
-                const unitSelect = document.querySelector(`.unit-select[data-product-id="${productId}"]`);
-                const selectedUnit = unitSelect.value;
-
-                if (product) {
-                    const itemTotal = product.price * qty;
-                    total += itemTotal;
-                    this.currentOrder.push({
-                        product: product.name,
-                        quantity: qty,
-                        unit: selectedUnit,
-                        price: product.price,
-                        total: itemTotal
-                    });
-                }
+        let html = '';
+        this.currentOrder.forEach((item, index) => {
+            total += item.total;
+            html += `<div class="cart-item-row">
+                <span>• ${item.product}: ${item.quantity} ${item.unit}`;
+            if (this.preferences.showPrices) {
+                html += ` = ₪${item.total.toFixed(2)}`;
             }
+            html += `</span>
+                <button class="btn btn-secondary btn-small" onclick="orderSystem.removeCartItem(${index})">✖</button>
+            </div>`;
         });
 
-        // Include ad-hoc manual items
         this.manualItems.forEach(item => {
             const itemTotal = item.price * item.quantity;
             total += itemTotal;
-            this.currentOrder.push({
+            html += `<div class="cart-item-row">
+                <span>✍️ ${item.name}: ${item.quantity} ${item.unit}`;
+            if (this.preferences.showPrices && item.price > 0) {
+                html += ` = ₪${itemTotal.toFixed(2)}`;
+            }
+            html += `</span></div>`;
+        });
+
+        if (this.preferences.showPrices) {
+            html += `<div style="margin-top: 10px; font-weight: bold; font-size: 18px;">סה"כ: ₪${total.toFixed(2)}</div>`;
+        }
+
+        container.innerHTML = html;
+        this.updateSendButtonLabel();
+    }
+
+    getOrderItems() {
+        const items = this.currentOrder.map(o => ({ ...o }));
+        this.manualItems.forEach(item => {
+            const itemTotal = item.price * item.quantity;
+            items.push({
                 product: item.name,
                 quantity: item.quantity,
                 unit: item.unit,
@@ -2374,34 +2565,16 @@ class OrderSystem {
                 manual: true
             });
         });
-
-        if (this.currentOrder.length === 0) {
-            container.innerHTML = '<p>לא נבחרו מוצרים</p>';
-            return;
-        }
-
-        let html = '<h4>סיכום הזמנה:</h4>';
-        this.currentOrder.forEach(item => {
-            html += `<div>• ${item.product}: ${item.quantity} ${item.unit}`;
-            if (this.preferences.showPrices) {
-                html += ` = ₪${item.total.toFixed(2)}`;
-            }
-            html += '</div>';
-        });
-        
-        if (this.preferences.showPrices) {
-            html += `<div style="margin-top: 10px; font-weight: bold; font-size: 18px;">סה"כ: ₪${total.toFixed(2)}</div>`;
-        }
-
-        container.innerHTML = html;
+        return items;
     }
 
     generateOrderMessage() {
         const supplierId = document.getElementById('supplier-select').value;
         const supplier = this.suppliers.find(s => s.id === supplierId);
         const deliveryDate = document.getElementById('delivery-date').value;
+        const orderItems = this.getOrderItems();
         
-        if (!supplier || this.currentOrder.length === 0) return '';
+        if (!supplier || orderItems.length === 0) return '';
 
         const now = new Date();
         const dateStr = now.toLocaleDateString('he-IL');
@@ -2415,7 +2588,7 @@ class OrderSystem {
         message += `📦 פריטים:\n`;
 
         let total = 0;
-        this.currentOrder.forEach(item => {
+        orderItems.forEach(item => {
             message += `• ${item.product}: ${item.quantity} ${item.unit}`;
             if (this.preferences.showPrices) {
                 message += ` = ₪${item.total.toFixed(2)}`;
@@ -2434,14 +2607,71 @@ class OrderSystem {
         return message;
     }
 
+    // Route to approval flow or direct send (chef/admin)
+    submitOrder() {
+        const isAdmin = typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.role === 'admin';
+        if (isAdmin) {
+            this.submitAndSendDirectly();
+        } else {
+            this.submitForApproval();
+        }
+    }
+
+    // Chef/admin: build order and send immediately without pending step
+    async submitAndSendDirectly() {
+        const supplierId = document.getElementById('supplier-select').value;
+        const supplier = this.suppliers.find(s => s.id === supplierId);
+        const orderItems = this.getOrderItems();
+
+        if (!supplier || orderItems.length === 0) {
+            alert('נא לבחור ספק ולהוסיף מוצרים לסל');
+            return;
+        }
+
+        if (!confirm(`לאשר ולשלוח את ההזמנה לספק "${supplier.name}"?`)) return;
+
+        const message = this.generateOrderMessage();
+        const deliveryDate = document.getElementById('delivery-date').value;
+        const procurementEmail = this.approvalSettings.procurementEmail;
+        const orderId = Date.now().toString();
+
+        await this.dispatchOrder(supplier, message, this.preferences.sendMethod, procurementEmail);
+
+        const managerPhone = this.approvalSettings.managerPhone;
+        if (managerPhone) {
+            const managerMessage = `📋 הזמנה אושרה ונשלחה לספק\nספק: ${supplier.name}\n\n${message}`;
+            setTimeout(() => this.openWhatsApp(managerPhone, managerMessage), 1200);
+        }
+
+        this.history.unshift({
+            id: orderId,
+            date: new Date().toISOString(),
+            supplier: supplier.name,
+            items: orderItems,
+            message: message,
+            deliveryDate: deliveryDate,
+            sendMethod: this.preferences.sendMethod,
+            showedPrices: this.preferences.showPrices,
+            createdByName: (typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.name) ? authSystem.currentUser.name : '',
+            approvedByName: (typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.name) ? authSystem.currentUser.name : '',
+            approved: true
+        });
+        this.saveData('history', this.history);
+
+        this.clearOrder();
+        this.loadHistory();
+        this.showAlert('✅ ההזמנה אושרה ונשלחה לספק', 'success');
+    }
+
     // Step 1: Employee submits the order for the chef's approval
     submitForApproval() {
         const supplierId = document.getElementById('supplier-select').value;
         const supplier = this.suppliers.find(s => s.id === supplierId);
+        const orderItems = this.getOrderItems();
 
-        if (!supplier || this.currentOrder.length === 0) {
-            alert('נא לבחור ספק ולהזין מוצרים');
-            return;
+        if (!supplier || orderItems.length === 0) {
+            alert('נא לבחור ספק ולהוסיף מוצרים לסל');
+            return null;
         }
 
         const message = this.generateOrderMessage();
@@ -2452,7 +2682,7 @@ class OrderSystem {
             date: new Date().toISOString(),
             supplierId: supplier.id,
             supplierSnapshot: { name: supplier.name, phone: supplier.phone, email: supplier.email },
-            items: this.currentOrder.slice(),
+            items: orderItems,
             message: message,
             deliveryDate: deliveryDate,
             sendMethod: this.preferences.sendMethod,
@@ -2480,10 +2710,24 @@ class OrderSystem {
         } else {
             this.showAlert('✅ ההזמנה נשמרה וממתינה לאישור (לא הוגדר מספר WhatsApp לשף בהגדרות)', 'info');
         }
+        return pendingOrder.id;
+    }
+
+    // Send order to supplier via WhatsApp and/or email
+    async dispatchOrder(supplier, message, sendMethod, procurementEmail) {
+        if (sendMethod === 'whatsapp') {
+            this.openWhatsApp(supplier.phone, message);
+        } else if (sendMethod === 'email') {
+            await this.sendEmail(supplier.email, message, procurementEmail);
+        } else if (sendMethod === 'both') {
+            this.openWhatsApp(supplier.phone, message);
+            await new Promise(r => setTimeout(r, 800));
+            await this.sendEmail(supplier.email, message, procurementEmail);
+        }
     }
 
     // Step 2: Chef approves -> send to supplier + orders manager
-    approveOrder(orderId) {
+    async approveOrder(orderId) {
         const order = this.pendingOrders.find(o => o.id === orderId);
         if (!order) return;
 
@@ -2493,15 +2737,7 @@ class OrderSystem {
         const message = order.message;
         const procurementEmail = this.approvalSettings.procurementEmail;
 
-        // Send to supplier by the chosen method (procurement gets a CC on email)
-        if (order.sendMethod === 'whatsapp') {
-            this.openWhatsApp(supplier.phone, message);
-        } else if (order.sendMethod === 'email') {
-            this.sendEmail(supplier.email, message, procurementEmail);
-        } else if (order.sendMethod === 'both') {
-            this.openWhatsApp(supplier.phone, message);
-            setTimeout(() => this.sendEmail(supplier.email, message, procurementEmail), 800);
-        }
+        await this.dispatchOrder(supplier, message, order.sendMethod, procurementEmail);
 
         // Notify the orders manager via WhatsApp
         const managerPhone = this.approvalSettings.managerPhone;
@@ -2566,26 +2802,130 @@ class OrderSystem {
         window.open(`https://wa.me/${intl}?text=${encodedMessage}`, '_blank');
     }
 
-    sendEmail(email, message, cc) {
-        if (!email) {
-            alert('אין כתובת אימייל לספק זה');
+    isPlaceholderEmail(email) {
+        const domain = String(email || '').split('@')[1]?.toLowerCase();
+        const blocked = ['example.com', 'example.org', 'example.net', 'test.com', 'localhost', 'invalid'];
+        return !domain || blocked.includes(domain);
+    }
+
+    validateSupplierEmail(email) {
+        const addr = String(email || '').trim();
+        if (!addr) return 'אין כתובת אימייל לספק זה — עדכן בטאב "ספקים"';
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) return `כתובת מייל לא תקינה: ${addr}`;
+        if (this.isPlaceholderEmail(addr)) {
+            return `מייל הספק (${addr}) הוא כתובת דוגמה — עדכן לכתובת אמיתית בטאב "ספקים"`;
+        }
+        return null;
+    }
+
+    async sendEmail(email, message, cc) {
+        const emailError = this.validateSupplierEmail(email);
+        if (emailError) {
+            this.showAlert(emailError, 'error');
+            return false;
+        }
+
+        const dateStr = new Date().toLocaleDateString('he-IL');
+        const subject = `הזמנה חדשה מ-${dateStr}`;
+        const procurementEmail = (cc || '').trim();
+
+        try {
+            const r = await fetch('/api/send-email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    to: email,
+                    bcc: procurementEmail || undefined,
+                    subject,
+                    text: message,
+                    replyTo: procurementEmail || undefined
+                })
+            });
+
+            const data = await r.json().catch(() => ({}));
+
+            if (r.ok) {
+                let msg = `📧 המייל נשלח ל-${email}`;
+                if (procurementEmail) msg += ` (עותק ל-${procurementEmail})`;
+                if (data.provider) msg += ` [${data.provider}]`;
+                this.showAlert(msg, 'success');
+                return true;
+            }
+
+            if (r.status === 503) {
+                return this.sendEmailViaMailto(email, message, procurementEmail, subject);
+            }
+
+            const hint = data.hint ? `\n${data.hint}` : '';
+            this.showAlert((data.error || r.statusText) + hint, 'error');
+            return false;
+        } catch (e) {
+            return this.sendEmailViaMailto(email, message, procurementEmail, subject);
+        }
+    }
+
+    async sendTestEmail() {
+        if (!authSystem || !authSystem.currentUser || authSystem.currentUser.role !== 'admin') {
+            alert('רק מנהל יכול לשלוח מייל בדיקה');
             return;
         }
+
+        const to = document.getElementById('procurement-email-input').value.trim();
+        if (!to) {
+            alert('הזן מייל רכש לפני בדיקה');
+            return;
+        }
+        if (this.isPlaceholderEmail(to)) {
+            alert('הזן כתובת מייל אמיתית (לא example.com)');
+            return;
+        }
+
         const dateStr = new Date().toLocaleDateString('he-IL');
-        const subject = encodeURIComponent(`🛒 הזמנה חדשה מ-${dateStr}`);
+        const text = `זהו מייל בדיקה ממערכת ההזמנות.\nתאריך: ${dateStr}\n\nאם קיבלת את זה — השרת מוגדר נכון ✅`;
+
+        try {
+            const r = await fetch('/api/send-email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    to,
+                    subject: `בדיקת מייל — מערכת הזמנות ${dateStr}`,
+                    text,
+                    test: true
+                })
+            });
+            const data = await r.json().catch(() => ({}));
+
+            if (r.ok) {
+                this.showAlert(`✅ מייל בדיקה נשלח ל-${to}. בדוק גם בתיקיית ספאם.`, 'success');
+            } else {
+                const hint = data.hint ? ` — ${data.hint}` : '';
+                this.showAlert((data.error || 'שגיאה בשליחה') + hint, 'error');
+            }
+        } catch (e) {
+            this.showAlert('שגיאת רשת בשליחת מייל בדיקה', 'error');
+        }
+    }
+
+    sendEmailViaMailto(email, message, cc, subject) {
+        const encodedSubject = encodeURIComponent(subject);
         const body = encodeURIComponent(message);
-        let url = `mailto:${email}?subject=${subject}&body=${body}`;
+        let url = `mailto:${email}?subject=${encodedSubject}&body=${body}`;
         if (cc) {
             url += `&cc=${encodeURIComponent(cc)}`;
         }
         window.location.href = url;
+        this.showAlert('📧 נפתח אפליקציית המייל — אשר שליחה ידנית (שרת מייל לא מוגדר)', 'info');
+        return true;
     }
 
     clearOrder() {
-        document.querySelectorAll('.quantity-input').forEach(input => input.value = 0);
+        const productIds = this.currentOrder.map(o => o.productId).filter(Boolean);
+        document.querySelectorAll('.shortage-input').forEach(input => { input.value = ''; });
         this.manualItems = [];
         this.renderManualItems();
         this.currentOrder = [];
+        productIds.forEach(id => this.syncProductCardFromCart(id));
         this.updateOrderSummary();
     }
 
@@ -2596,8 +2936,8 @@ class OrderSystem {
     printCurrentOrder() {
         const supplierId = document.getElementById('supplier-select').value;
         const supplier = this.suppliers.find(s => s.id === supplierId);
-        if (!supplier || this.currentOrder.length === 0) {
-            alert('נא לבחור ספק ולהזין מוצרים לפני הדפסה');
+        if (!supplier || this.getOrderItems().length === 0) {
+            alert('נא לבחור ספק ולהוסיף מוצרים לסל לפני הדפסה');
             return;
         }
         const orderedBy = (typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.name) ? authSystem.currentUser.name : '';
@@ -2605,7 +2945,7 @@ class OrderSystem {
             supplierName: supplier.name,
             deliveryDate: document.getElementById('delivery-date').value,
             dateStr: new Date().toLocaleDateString('he-IL'),
-            items: this.currentOrder,
+            items: this.getOrderItems(),
             showPrices: this.preferences.showPrices,
             orderedBy: orderedBy
         }));
@@ -3090,6 +3430,9 @@ class OrderSystem {
 
         if (key === 'showPrices') {
             this.updateOrderSummary();
+        }
+        if (key === 'sendMethod') {
+            this.updateSupplierEmailWarning();
         }
     }
 

@@ -1073,6 +1073,84 @@ label {
 
 .product-card .unit-select {
     width: 100%;
+    flex: 1;
+    min-width: 0;
+}
+
+.shortage-block {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.shortage-label {
+    font-size: 13px;
+    font-weight: 700;
+    color: #e65100;
+}
+
+.shortage-row {
+    display: flex;
+    gap: 6px;
+    align-items: stretch;
+    width: 100%;
+}
+
+.shortage-input {
+    width: 64px;
+    flex-shrink: 0;
+    text-align: center;
+    padding: 8px 4px;
+    border: 2px solid #ffb74d;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.update-shortage-btn {
+    flex-shrink: 0;
+    padding: 8px 12px;
+    border: none;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #FB8C00, #EF6C00);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.update-shortage-btn:hover {
+    filter: brightness(1.05);
+}
+
+.in-cart-badge {
+    font-size: 13px;
+    font-weight: 700;
+    color: #2E7D32;
+    background: #e8f5e9;
+    border-radius: 6px;
+    padding: 6px 8px;
+    text-align: center;
+}
+
+.cart-item-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 0;
+    border-bottom: 1px solid #eee;
+}
+
+.cart-item-row:last-child {
+    border-bottom: none;
+}
+
+.cart-empty-hint {
+    color: #888;
+    font-size: 14px;
+    margin: 0 0 12px;
 }
 
 /* Weekday picker (supplier order days) */
