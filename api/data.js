@@ -3,7 +3,7 @@
 // POST -> any subset of those arrays; each provided array is saved.
 const kv = require('../kvclient');
 
-const ARRAY_KEYS = ['products', 'suppliers', 'staff', 'pendingOrders', 'history'];
+const ARRAY_KEYS = ['products', 'suppliers', 'staff', 'users', 'pendingOrders', 'history', 'needs'];
 const OBJECT_KEYS = ['approvalSettings']; // shared config objects (phones, procurement email)
 
 module.exports = async (req, res) => {
