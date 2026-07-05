@@ -2347,10 +2347,13 @@ class OrderSystem {
         this.currentOrder.push({
             productId: product.id,
             product: product.name,
+            sku: product.sku || product.id,
             quantity: quantity,
             unit: selectedUnit,
             price: product.price,
-            total: product.price * quantity
+            total: product.price * quantity,
+            stockQty: Number(product.stockQty) || 0,
+            parLevel: Number(product.parLevel) || 0
         });
 
         this.syncProductCardFromCart(productId);
@@ -2568,43 +2571,190 @@ class OrderSystem {
         return items;
     }
 
-    generateOrderMessage() {
-        const supplierId = document.getElementById('supplier-select').value;
-        const supplier = this.suppliers.find(s => s.id === supplierId);
-        const deliveryDate = document.getElementById('delivery-date').value;
-        const orderItems = this.getOrderItems();
-        
-        if (!supplier || orderItems.length === 0) return '';
+    enrichOrderItem(item) {
+        if (item.manual) {
+            return {
+                ...item,
+                sku: item.sku || '—',
+                stockQty: item.stockQty != null ? item.stockQty : '—',
+                parLevel: item.parLevel != null ? item.parLevel : '—'
+            };
+        }
+        const product = this.products.find(
+            p => p.id === item.productId || p.name === item.product
+        );
+        return {
+            ...item,
+            sku: item.sku || (product && (product.sku || product.id)) || '—',
+            stockQty: item.stockQty != null ? item.stockQty : (product ? (Number(product.stockQty) || 0) : '—'),
+            parLevel: item.parLevel != null ? item.parLevel : (product ? (Number(product.parLevel) || 0) : '—')
+        };
+    }
 
-        const now = new Date();
-        const dateStr = now.toLocaleDateString('he-IL');
-        const timeStr = now.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
-        
-        const deliveryDateFormatted = deliveryDate ? new Date(deliveryDate).toLocaleDateString('he-IL') : '—';
+    escapeHtml(str) {
+        return String(str ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
 
-        let message = `היי ${supplier.name}! 🛒\n\n`;
-        message += `הזמנה חדשה - ${dateStr} ${timeStr}\n`;
-        message += `📅 תאריך אספקה מבוקש: ${deliveryDateFormatted}\n\n`;
-        message += `📦 פריטים:\n`;
+    // Structured market-list email: plain text + HTML table
+    buildOrderEmailContent(opts) {
+        const {
+            supplierName,
+            deliveryDate,
+            orderDate,
+            items,
+            showPrices,
+            orderedBy,
+            approvedBy
+        } = opts;
 
+        const orderDateStr = orderDate
+            ? new Date(orderDate).toLocaleDateString('he-IL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+            : new Date().toLocaleDateString('he-IL');
+        const orderTimeStr = orderDate
+            ? new Date(orderDate).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })
+            : new Date().toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+        const deliveryStr = deliveryDate
+            ? new Date(deliveryDate).toLocaleDateString('he-IL', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+            : '—';
+
+        const enriched = items.map(it => this.enrichOrderItem(it));
         let total = 0;
-        orderItems.forEach(item => {
-            message += `• ${item.product}: ${item.quantity} ${item.unit}`;
-            if (this.preferences.showPrices) {
-                message += ` = ₪${item.total.toFixed(2)}`;
+
+        // —— Plain text (fallback / WhatsApp-style) ——
+        let text = `רשימת הזמנה — ${supplierName}\n`;
+        text += `${'='.repeat(42)}\n`;
+        text += `תאריך הזמנה: ${orderDateStr} ${orderTimeStr}\n`;
+        text += `תאריך אספקה מבוקש: ${deliveryStr}\n`;
+        if (orderedBy) text += `הוזמן ע"י: ${orderedBy}\n`;
+        if (approvedBy) text += `אושר ע"י: ${approvedBy}\n`;
+        text += `\n`;
+        text += '#  | מק"ט    | שם פריט              | כמות | יחידה  | מלאי | פתיחה';
+        if (showPrices) text += ' | מחיר   | סה"כ';
+        text += '\n';
+        text += '-'.repeat(showPrices ? 78 : 62) + '\n';
+
+        enriched.forEach((it, i) => {
+            const lineTotal = it.total != null ? it.total : (it.price || 0) * it.quantity;
+            total += lineTotal;
+            const name = String(it.product).slice(0, 20).padEnd(20);
+            const sku = String(it.sku).slice(0, 7).padEnd(7);
+            text += `${String(i + 1).padStart(2)} | ${sku} | ${name} | ${String(it.quantity).padStart(4)} | ${String(it.unit).padEnd(6)} | ${String(it.stockQty).padStart(4)} | ${String(it.parLevel).padStart(5)}`;
+            if (showPrices) {
+                text += ` | ${(it.price || 0).toFixed(2).padStart(6)} | ${lineTotal.toFixed(2).padStart(7)}`;
             }
-            message += '\n';
-            total += item.total;
+            text += '\n';
         });
 
-        if (this.preferences.showPrices) {
-            message += `\n━━━━━━━━━━━━━━━\n`;
-            message += `סה"כ: ₪${total.toFixed(2)}\n`;
+        if (showPrices) {
+            text += `\nסה"כ להזמנה: ₪${total.toFixed(2)}\n`;
         }
+        text += `\nתודה!\n`;
 
-        message += `\nתודה! 😊`;
+        // —— HTML market list ——
+        const priceHeaders = showPrices
+            ? '<th style="padding:10px 8px;border:1px solid #c8e6c9;background:#2e7d32;color:#fff;font-size:13px;">מחיר יח׳</th><th style="padding:10px 8px;border:1px solid #c8e6c9;background:#2e7d32;color:#fff;font-size:13px;">סה״כ</th>'
+            : '';
+        let rows = '';
+        enriched.forEach((it, i) => {
+            const lineTotal = it.total != null ? it.total : (it.price || 0) * it.quantity;
+            const bg = i % 2 === 0 ? '#ffffff' : '#f1f8e9';
+            const priceCells = showPrices
+                ? `<td style="padding:9px 8px;border:1px solid #e0e0e0;text-align:center;background:${bg}">₪${(it.price || 0).toFixed(2)}</td>
+                   <td style="padding:9px 8px;border:1px solid #e0e0e0;text-align:center;font-weight:700;background:${bg}">₪${lineTotal.toFixed(2)}</td>`
+                : '';
+            rows += `<tr>
+                <td style="padding:9px 8px;border:1px solid #e0e0e0;text-align:center;background:${bg}">${i + 1}</td>
+                <td style="padding:9px 8px;border:1px solid #e0e0e0;text-align:center;font-family:monospace;background:${bg}">${this.escapeHtml(it.sku)}</td>
+                <td style="padding:9px 8px;border:1px solid #e0e0e0;text-align:right;font-weight:600;background:${bg}">${this.escapeHtml(it.product)}${it.manual ? ' ✍️' : ''}</td>
+                <td style="padding:9px 8px;border:1px solid #e0e0e0;text-align:center;font-size:16px;font-weight:700;color:#e65100;background:${bg}">${it.quantity}</td>
+                <td style="padding:9px 8px;border:1px solid #e0e0e0;text-align:center;background:${bg}">${this.escapeHtml(it.unit)}</td>
+                <td style="padding:9px 8px;border:1px solid #e0e0e0;text-align:center;background:${bg}">${it.stockQty}</td>
+                <td style="padding:9px 8px;border:1px solid #e0e0e0;text-align:center;background:${bg}">${it.parLevel}</td>
+                ${priceCells}
+            </tr>`;
+        });
 
-        return message;
+        const totalRow = showPrices
+            ? `<tr><td colspan="8" style="padding:12px 8px;border:1px solid #c8e6c9;text-align:left;font-weight:700;font-size:16px;background:#e8f5e9">סה״כ להזמנה</td>
+               <td style="padding:12px 8px;border:1px solid #c8e6c9;text-align:center;font-weight:700;font-size:16px;background:#e8f5e9">₪${total.toFixed(2)}</td></tr>`
+            : '';
+
+        const metaRows = [
+            ['ספק', supplierName],
+            ['תאריך הזמנה', `${orderDateStr} · ${orderTimeStr}`],
+            ['תאריך אספקה מבוקש', deliveryStr],
+            orderedBy ? ['הוזמן ע"י', orderedBy] : null,
+            approvedBy ? ['אושר ע"י', approvedBy] : null
+        ].filter(Boolean).map(([k, v]) =>
+            `<tr><td style="padding:6px 12px;color:#555;font-weight:600;width:140px">${this.escapeHtml(k)}</td>
+             <td style="padding:6px 12px;font-weight:700">${this.escapeHtml(v)}</td></tr>`
+        ).join('');
+
+        const html = `<!DOCTYPE html>
+<html lang="he" dir="rtl"><head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif">
+<div style="max-width:720px;margin:0 auto;padding:20px">
+  <div style="background:linear-gradient(135deg,#2e7d32,#43a047);color:#fff;border-radius:12px 12px 0 0;padding:20px 24px">
+    <div style="font-size:22px;font-weight:700">🛒 רשימת הזמנה לספק</div>
+    <div style="font-size:15px;margin-top:6px;opacity:0.95">${this.escapeHtml(supplierName)}</div>
+  </div>
+  <div style="background:#fff;border:1px solid #e0e0e0;border-top:none;padding:16px 24px">
+    <table style="width:100%;border-collapse:collapse;font-size:14px">${metaRows}</table>
+  </div>
+  <div style="background:#fff;border:1px solid #e0e0e0;border-top:none;padding:0 12px 16px;overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:14px;min-width:560px">
+      <thead><tr>
+        <th style="padding:10px 8px;border:1px solid #c8e6c9;background:#2e7d32;color:#fff;font-size:13px;">#</th>
+        <th style="padding:10px 8px;border:1px solid #c8e6c9;background:#2e7d32;color:#fff;font-size:13px;">מק״ט</th>
+        <th style="padding:10px 8px;border:1px solid #c8e6c9;background:#2e7d32;color:#fff;font-size:13px;">שם פריט</th>
+        <th style="padding:10px 8px;border:1px solid #c8e6c9;background:#2e7d32;color:#fff;font-size:13px;">כמות</th>
+        <th style="padding:10px 8px;border:1px solid #c8e6c9;background:#2e7d32;color:#fff;font-size:13px;">יחידה</th>
+        <th style="padding:10px 8px;border:1px solid #c8e6c9;background:#2e7d32;color:#fff;font-size:13px;">מלאי קיים</th>
+        <th style="padding:10px 8px;border:1px solid #c8e6c9;background:#2e7d32;color:#fff;font-size:13px;">מלאי פתיחה</th>
+        ${priceHeaders}
+      </tr></thead>
+      <tbody>${rows}${totalRow}</tbody>
+    </table>
+  </div>
+  <div style="background:#fafafa;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 12px 12px;padding:14px 24px;color:#888;font-size:12px;text-align:center">
+    הודעה אוטומטית ממערכת ההזמנות
+  </div>
+</div>
+</body></html>`;
+
+        const subjectDate = orderDate
+            ? new Date(orderDate).toLocaleDateString('he-IL')
+            : new Date().toLocaleDateString('he-IL');
+
+        return { text, html, subject: `רשימת הזמנה — ${supplierName} — ${subjectDate}` };
+    }
+
+    getCurrentOrderEmailPayload() {
+        const supplierId = document.getElementById('supplier-select').value;
+        const supplier = this.suppliers.find(s => s.id === supplierId);
+        const orderItems = this.getOrderItems();
+        if (!supplier || orderItems.length === 0) return null;
+
+        const orderedBy = (typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.name)
+            ? authSystem.currentUser.name : '';
+
+        return this.buildOrderEmailContent({
+            supplierName: supplier.name,
+            deliveryDate: document.getElementById('delivery-date').value,
+            orderDate: new Date().toISOString(),
+            items: orderItems,
+            showPrices: this.preferences.showPrices,
+            orderedBy
+        });
+    }
+
+    generateOrderMessage() {
+        const payload = this.getCurrentOrderEmailPayload();
+        return payload ? payload.text : '';
     }
 
     // Route to approval flow or direct send (chef/admin)
@@ -2630,12 +2780,13 @@ class OrderSystem {
 
         if (!confirm(`לאשר ולשלוח את ההזמנה לספק "${supplier.name}"?`)) return;
 
-        const message = this.generateOrderMessage();
+        const emailPayload = this.getCurrentOrderEmailPayload();
+        const message = emailPayload ? emailPayload.text : '';
         const deliveryDate = document.getElementById('delivery-date').value;
         const procurementEmail = this.approvalSettings.procurementEmail;
         const orderId = Date.now().toString();
 
-        await this.dispatchOrder(supplier, message, this.preferences.sendMethod, procurementEmail);
+        await this.dispatchOrder(supplier, message, this.preferences.sendMethod, procurementEmail, emailPayload);
 
         const managerPhone = this.approvalSettings.managerPhone;
         if (managerPhone) {
@@ -2674,7 +2825,8 @@ class OrderSystem {
             return null;
         }
 
-        const message = this.generateOrderMessage();
+        const emailPayload = this.getCurrentOrderEmailPayload();
+        const message = emailPayload ? emailPayload.text : '';
         const deliveryDate = document.getElementById('delivery-date').value;
 
         const pendingOrder = {
@@ -2714,15 +2866,18 @@ class OrderSystem {
     }
 
     // Send order to supplier via WhatsApp and/or email
-    async dispatchOrder(supplier, message, sendMethod, procurementEmail) {
+    async dispatchOrder(supplier, message, sendMethod, procurementEmail, emailPayload) {
+        const html = emailPayload && emailPayload.html ? emailPayload.html : null;
+        const subject = emailPayload && emailPayload.subject ? emailPayload.subject : null;
+
         if (sendMethod === 'whatsapp') {
             this.openWhatsApp(supplier.phone, message);
         } else if (sendMethod === 'email') {
-            await this.sendEmail(supplier.email, message, procurementEmail);
+            await this.sendEmail(supplier.email, message, procurementEmail, html, subject);
         } else if (sendMethod === 'both') {
             this.openWhatsApp(supplier.phone, message);
             await new Promise(r => setTimeout(r, 800));
-            await this.sendEmail(supplier.email, message, procurementEmail);
+            await this.sendEmail(supplier.email, message, procurementEmail, html, subject);
         }
     }
 
@@ -2737,7 +2892,19 @@ class OrderSystem {
         const message = order.message;
         const procurementEmail = this.approvalSettings.procurementEmail;
 
-        await this.dispatchOrder(supplier, message, order.sendMethod, procurementEmail);
+        const approvedByName = (typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.name)
+            ? authSystem.currentUser.name : '';
+        const emailPayload = this.buildOrderEmailContent({
+            supplierName: supplier.name,
+            deliveryDate: order.deliveryDate,
+            orderDate: order.date,
+            items: order.items,
+            showPrices: order.showedPrices,
+            orderedBy: order.createdByName || '',
+            approvedBy: approvedByName
+        });
+
+        await this.dispatchOrder(supplier, message, order.sendMethod, procurementEmail, emailPayload);
 
         // Notify the orders manager via WhatsApp
         const managerPhone = this.approvalSettings.managerPhone;
@@ -2818,7 +2985,7 @@ class OrderSystem {
         return null;
     }
 
-    async sendEmail(email, message, cc) {
+    async sendEmail(email, message, cc, html, subjectOverride) {
         const emailError = this.validateSupplierEmail(email);
         if (emailError) {
             this.showAlert(emailError, 'error');
@@ -2826,7 +2993,7 @@ class OrderSystem {
         }
 
         const dateStr = new Date().toLocaleDateString('he-IL');
-        const subject = `הזמנה חדשה מ-${dateStr}`;
+        const subject = subjectOverride || `הזמנה חדשה מ-${dateStr}`;
         const procurementEmail = (cc || '').trim();
 
         try {
@@ -2838,6 +3005,7 @@ class OrderSystem {
                     bcc: procurementEmail || undefined,
                     subject,
                     text: message,
+                    html: html || undefined,
                     replyTo: procurementEmail || undefined
                 })
             });

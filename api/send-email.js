@@ -148,7 +148,7 @@ module.exports = async (req, res) => {
 
     try {
         const body = parseBody(req);
-        const { to, cc, bcc, subject, text, replyTo, test } = body;
+        const { to, cc, bcc, subject, text, html, replyTo, test } = body;
 
         const toList = normalizeList(to);
         const ccList = normalizeList(cc);
@@ -195,7 +195,7 @@ module.exports = async (req, res) => {
             return;
         }
 
-        const html = buildHtml(text);
+        const emailHtml = html || buildHtml(text);
         const cleanSubject = String(subject).replace(/[\u{1F300}-\u{1FAFF}]/gu, '').trim();
 
         const sendOpts = {
@@ -204,7 +204,7 @@ module.exports = async (req, res) => {
             bcc: bccList,
             subject: cleanSubject,
             text,
-            html,
+            html: emailHtml,
             replyTo: replyTo || process.env.EMAIL_REPLY_TO || process.env.SMTP_USER || undefined
         };
 
