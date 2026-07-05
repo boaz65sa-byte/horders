@@ -2905,9 +2905,46 @@ class OrderSystem {
     // History
     // ===========================
 
+    // Total ₪ of a history order (falls back to price×qty when total is missing)
+    orderTotal(h) {
+        return (h.items || []).reduce((sum, i) => sum + (i.total != null ? i.total : (i.price || 0) * (i.quantity || 0)), 0);
+    }
+
+    renderExpenseSummary() {
+        const el = document.getElementById('expense-summary');
+        if (!el) return;
+        if (this.history.length === 0) { el.innerHTML = ''; return; }
+
+        const now = new Date();
+        const ym = now.getFullYear() + '-' + now.getMonth();
+        let total = 0, month = 0;
+        const bySup = {};
+        this.history.forEach(h => {
+            const t = this.orderTotal(h);
+            total += t;
+            const d = new Date(h.date);
+            if (d.getFullYear() + '-' + d.getMonth() === ym) month += t;
+            bySup[h.supplier] = (bySup[h.supplier] || 0) + t;
+        });
+
+        const top = Object.entries(bySup).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 5);
+        const topHtml = top.length
+            ? top.map(([n, v]) => `<div class="dash-recent"><span>${n}</span><span>₪${v.toFixed(0)}</span></div>`).join('')
+            : '<p class="dash-empty">אין נתוני מחירים (מלא מחירים במוצרים כדי לראות הוצאות)</p>';
+
+        el.innerHTML = `
+            <div class="dash-stats">
+                <div class="dash-stat dash-stat-static"><div class="dash-stat-num">₪${month.toFixed(0)}</div><div class="dash-stat-label">💰 הוצאה החודש</div></div>
+                <div class="dash-stat dash-stat-static"><div class="dash-stat-num">₪${total.toFixed(0)}</div><div class="dash-stat-label">💰 סה"כ הכל</div></div>
+            </div>
+            <div class="dash-block"><h3>💰 הוצאה לפי ספק</h3>${topHtml}</div>
+        `;
+    }
+
     loadHistory() {
+        this.renderExpenseSummary();
         const container = document.getElementById('history-list');
-        
+
         if (this.history.length === 0) {
             container.innerHTML = '<p class="alert alert-info">אין היסטוריית הזמנות</p>';
             return;
