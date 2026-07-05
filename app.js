@@ -744,6 +744,9 @@ class OrderSystem {
 
         const printOrderBtn = document.getElementById('print-order-btn');
         if (printOrderBtn) printOrderBtn.addEventListener('click', () => this.printCurrentOrder());
+
+        const repeatLastOrderBtn = document.getElementById('repeat-last-order-btn');
+        if (repeatLastOrderBtn) repeatLastOrderBtn.addEventListener('click', () => this.repeatLastOrder());
         
         // Preferences
         const showPricesCheck = document.getElementById('show-prices');
@@ -1960,18 +1963,62 @@ class OrderSystem {
         const searchEmpty = document.getElementById('search-empty');
         if (searchEmpty) searchEmpty.style.display = 'none';
 
+        const repeatBtn = document.getElementById('repeat-last-order-btn');
+
         if (!supplierId) {
             document.getElementById('products-list').innerHTML = '';
             document.getElementById('delivery-date-section').style.display = 'none';
             document.getElementById('product-search-section').style.display = 'none';
             document.getElementById('manual-item-section').style.display = 'none';
             document.getElementById('shipping-settings').style.display = 'none';
+            if (repeatBtn) repeatBtn.style.display = 'none';
             return;
         }
 
         document.getElementById('delivery-date-section').style.display = 'block';
         document.getElementById('manual-item-section').style.display = 'block';
         this.loadProducts(supplierId);
+
+        // Show "repeat last order" only if this supplier has a prior order in history
+        if (repeatBtn) {
+            const supplier = this.suppliers.find(s => s.id === supplierId);
+            const hasPrev = supplier && this.history.some(h => h.supplier === supplier.name);
+            repeatBtn.style.display = hasPrev ? 'block' : 'none';
+        }
+    }
+
+    // Pre-fill the order with the quantities from this supplier's most recent order
+    repeatLastOrder() {
+        const supplierId = document.getElementById('supplier-select').value;
+        const supplier = this.suppliers.find(s => s.id === supplierId);
+        if (!supplier) return;
+
+        const last = this.history.find(h => h.supplier === supplier.name);
+        if (!last || !Array.isArray(last.items) || last.items.length === 0) {
+            this.showAlert('אין הזמנה קודמת לספק זה', 'info');
+            return;
+        }
+
+        this.clearOrder(); // reset quantities + manual items first
+
+        last.items.forEach(it => {
+            if (it.manual) {
+                this.manualItems.push({ name: it.product, quantity: it.quantity, unit: it.unit, price: it.price || 0 });
+                return;
+            }
+            const prod = this.products.find(p => p.supplierId === supplierId && p.name === it.product);
+            const input = prod ? document.querySelector(`.quantity-input[data-product-id="${prod.id}"]`) : null;
+            if (input) {
+                input.value = it.quantity;
+            } else {
+                // product no longer in the catalog → keep it as a manual line
+                this.manualItems.push({ name: it.product, quantity: it.quantity, unit: it.unit, price: it.price || 0 });
+            }
+        });
+
+        this.renderManualItems();
+        this.updateOrderSummary();
+        this.showAlert(`🔁 נטענה ההזמנה האחרונה (${last.items.length} פריטים). עדכן כמויות ושלח לאישור.`, 'success');
     }
 
     filterProducts(term) {
