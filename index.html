@@ -21,10 +21,10 @@
             
             <div class="login-box">
                 <h2>🔐 כניסה למערכת</h2>
-                <p class="login-info">בחר מי אתה והזן קוד כניסה</p>
+                <p class="login-info">בחר מי אתה והזן את הסיסמה האישית שלך</p>
 
                 <select id="login-name" class="login-input login-name-select"></select>
-                <input type="password" id="login-code" class="login-input" placeholder="הזן קוד כניסה" maxlength="6">
+                <input type="password" id="login-code" class="login-input" placeholder="סיסמה אישית">
                 <button id="login-btn" class="btn btn-primary">🔓 כניסה</button>
                 
                 <div id="login-error" class="login-error" style="display: none;">
@@ -317,37 +317,26 @@
                 <h2>⚙️ הגדרות מערכת</h2>
                 <p class="admin-note">🔐 אזור מנהל בלבד</p>
                 
-                <!-- Change Employee Code -->
+                <!-- User Management (login accounts) -->
                 <div class="settings-section">
-                    <h3>🔑 שינוי קוד עובד</h3>
-                    <p class="help-text">קוד העובד הנוכחי מוסתר מסיבות אבטחה</p>
-                    
-                    <label for="new-employee-code">קוד עובד חדש (6 ספרות):</label>
-                    <input type="password" id="new-employee-code" class="input-field" placeholder="הזן 6 ספרות" maxlength="6" pattern="[0-9]{6}">
-                    
-                    <label for="confirm-employee-code">אימות קוד עובד:</label>
-                    <input type="password" id="confirm-employee-code" class="input-field" placeholder="הזן שוב את הקוד" maxlength="6" pattern="[0-9]{6}">
-                    
-                    <button id="change-employee-code-btn" class="btn btn-primary">💾 שמור קוד חדש</button>
-                </div>
+                    <h3>👥 ניהול משתמשים וכניסה</h3>
+                    <p class="help-text">כל אחד נכנס עם השם שלו + סיסמה אישית. השף מוסיף / עורך / מוחק משתמשים ומאפס סיסמאות.</p>
 
-                <hr style="margin: 30px 0;">
+                    <label for="user-name-input">שם:</label>
+                    <input type="text" id="user-name-input" class="input-field" placeholder="לדוגמה: יוסי / מחסנאי">
 
-                <!-- Change Admin Code -->
-                <div class="settings-section">
-                    <h3>🔐 שינוי קוד מנהל</h3>
-                    <p class="help-text danger-text">⚠️ שים לב! שינוי קוד המנהל ידרוש כניסה מחדש</p>
-                    
-                    <label for="current-admin-code">קוד מנהל נוכחי:</label>
-                    <input type="password" id="current-admin-code" class="input-field" placeholder="הזן קוד נוכחי" maxlength="6" pattern="[0-9]{6}">
-                    
-                    <label for="new-admin-code">קוד מנהל חדש (6 ספרות):</label>
-                    <input type="password" id="new-admin-code" class="input-field" placeholder="הזן 6 ספרות" maxlength="6" pattern="[0-9]{6}">
-                    
-                    <label for="confirm-admin-code">אימות קוד מנהל:</label>
-                    <input type="password" id="confirm-admin-code" class="input-field" placeholder="הזן שוב את הקוד" maxlength="6" pattern="[0-9]{6}">
-                    
-                    <button id="change-admin-code-btn" class="btn btn-primary">💾 שמור קוד חדש</button>
+                    <label for="user-password-input">סיסמה:</label>
+                    <input type="text" id="user-password-input" class="input-field" placeholder="סיסמה אישית">
+
+                    <label for="user-role-input">הרשאה:</label>
+                    <select id="user-role-input" class="input-field">
+                        <option value="employee">👤 עובד</option>
+                        <option value="admin">👑 מנהל (שף) — שליטה מלאה</option>
+                    </select>
+
+                    <button id="add-user-btn" class="btn btn-primary">➕ הוסף משתמש</button>
+
+                    <div id="users-list" style="margin-top: 15px;"></div>
                 </div>
 
                 <hr style="margin: 30px 0;">
@@ -367,20 +356,6 @@
                     <input type="email" id="procurement-email-input" class="input-field" placeholder="לדוגמה: rechesh@example.com">
 
                     <button id="save-approval-phones-btn" class="btn btn-primary">💾 שמור הגדרות</button>
-                </div>
-
-                <hr style="margin: 30px 0;">
-
-                <!-- Staff Management -->
-                <div class="settings-section">
-                    <h3>👥 ניהול צוות (שמות לכניסה)</h3>
-                    <p class="help-text">השמות/תפקידים שיופיעו ברשימת הבחירה בכניסה ויירשמו על כל הזמנה.</p>
-
-                    <label for="staff-name-input">שם / תפקיד:</label>
-                    <input type="text" id="staff-name-input" class="input-field" placeholder="לדוגמה: סגן שף">
-                    <button id="add-staff-btn" class="btn btn-primary">➕ הוסף לצוות</button>
-
-                    <div id="staff-list" style="margin-top: 15px;"></div>
                 </div>
 
                 <hr style="margin: 30px 0;">
@@ -457,6 +432,31 @@
             <div class="modal-actions">
                 <button id="save-product-btn" class="btn btn-primary">💾 שמור</button>
                 <button id="cancel-product-edit-btn" class="btn btn-secondary">❌ ביטול</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit User Modal -->
+    <div id="edit-user-modal" class="modal">
+        <div class="modal-content">
+            <h2>✏️ עריכת משתמש</h2>
+            <input type="hidden" id="edit-user-id">
+
+            <label for="edit-user-name">שם:</label>
+            <input type="text" id="edit-user-name" class="input-field">
+
+            <label for="edit-user-password">סיסמה:</label>
+            <input type="text" id="edit-user-password" class="input-field">
+
+            <label for="edit-user-role">הרשאה:</label>
+            <select id="edit-user-role" class="input-field">
+                <option value="employee">👤 עובד</option>
+                <option value="admin">👑 מנהל (שף) — שליטה מלאה</option>
+            </select>
+
+            <div class="modal-actions">
+                <button id="save-user-btn" class="btn btn-primary">💾 שמור</button>
+                <button id="cancel-user-edit-btn" class="btn btn-secondary">❌ ביטול</button>
             </div>
         </div>
     </div>

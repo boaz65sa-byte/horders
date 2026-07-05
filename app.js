@@ -153,8 +153,29 @@ function loadStaff() {
     return DEFAULT_STAFF.map((n, i) => ({ id: String(i + 1), name: n }));
 }
 
+// ===========================
+// Users (per-person accounts: name + password + role) — managed by the chef
+// ===========================
+const DEFAULT_USERS = [
+    { id: 'u1', name: 'שף ראשי', password: '123456', role: 'admin' },
+    { id: 'u2', name: 'סגן שף', password: '654321', role: 'employee' },
+    { id: 'u3', name: 'שף חלבי', password: '654321', role: 'employee' },
+    { id: 'u4', name: 'שף בשרי', password: '654321', role: 'employee' },
+    { id: 'u5', name: 'מחסנאי', password: '654321', role: 'employee' },
+    { id: 'u6', name: 'עובד מטבח', password: '654321', role: 'employee' }
+];
+
+// Reads the users list from localStorage, or returns sensible defaults (not persisted)
+function loadUsers() {
+    try {
+        const u = JSON.parse(localStorage.getItem('users'));
+        if (Array.isArray(u) && u.length) return u;
+    } catch (_) { /* ignore */ }
+    return DEFAULT_USERS.map(x => ({ ...x }));
+}
+
 // Array collections mirrored to the shared (KV) bank across devices
-const SHARED_KEYS = ['products', 'suppliers', 'staff', 'pendingOrders', 'history', 'needs'];
+const SHARED_KEYS = ['products', 'suppliers', 'staff', 'users', 'pendingOrders', 'history', 'needs'];
 // Config objects mirrored to the shared bank (phones, procurement email)
 const SHARED_OBJECT_KEYS = ['approvalSettings'];
 
@@ -239,37 +260,33 @@ class AuthSystem {
             return;
         }
 
-        const code = codeInput.value.trim();
+        const password = codeInput.value.trim();
         const nameSelect = document.getElementById('login-name');
         const name = nameSelect ? nameSelect.value.trim() : '';
-
-        if (code.length !== 6 || !/^\d+$/.test(code)) {
-            this.showError('הקוד חייב להיות 6 ספרות');
-            return;
-        }
 
         if (!name) {
             this.showError('בחר מי אתה');
             return;
         }
+        if (!password) {
+            this.showError('הזן סיסמה');
+            return;
+        }
 
-        if (code === this.adminCode) {
-            this.currentUser = { role: 'admin', code: code, name: name };
-            this.saveData('currentUser', this.currentUser);
-            this.showApp();
-        } else if (code === this.employeeCode) {
-            this.currentUser = { role: 'employee', code: code, name: name };
+        // Authenticate against the per-user list (name + personal password)
+        const user = loadUsers().find(u => u.name === name);
+        if (user && String(user.password) === password) {
+            this.currentUser = { id: user.id, role: user.role, name: user.name };
             this.saveData('currentUser', this.currentUser);
             this.showApp();
         } else {
             if (errorDiv) {
+                errorDiv.textContent = '❌ סיסמה שגויה';
                 errorDiv.style.display = 'block';
             }
             codeInput.value = '';
             setTimeout(() => {
-                if (errorDiv) {
-                    errorDiv.style.display = 'none';
-                }
+                if (errorDiv) errorDiv.style.display = 'none';
             }, 3000);
         }
     }
@@ -290,17 +307,17 @@ class AuthSystem {
         this.populateLoginNames();
     }
 
-    // Fill the "who are you" dropdown from the staff list
+    // Fill the "who are you" dropdown from the users list
     populateLoginNames() {
         const select = document.getElementById('login-name');
         if (!select) return;
         const prev = select.value;
-        const staff = loadStaff();
+        const users = loadUsers();
         select.innerHTML = '<option value="">-- בחר מי אתה --</option>';
-        staff.forEach(member => {
+        users.forEach(u => {
             const opt = document.createElement('option');
-            opt.value = member.name;
-            opt.textContent = member.name;
+            opt.value = u.name;
+            opt.textContent = u.name;
             select.appendChild(opt);
         });
         if (prev) select.value = prev;
@@ -495,6 +512,7 @@ class OrderSystem {
         this.history = this.loadData('history') || [];
         this.pendingOrders = this.loadData('pendingOrders') || [];
         this.staff = this.loadData('staff') || loadStaff();
+        this.users = this.loadData('users') || loadUsers(); // per-person accounts (name+password+role)
         this.needs = this.loadData('needs') || []; // reported shortages (flagged by role-holders)
         this.approvalSettings = this.loadData('approvalSettings') || {
             chefPhone: '',
@@ -530,9 +548,11 @@ class OrderSystem {
         }
         this.autoFillImages(true); // fill missing product images from the web (silent)
         this.renderAllProducts();
-        // Persist default staff on first run so it syncs to other devices
+        // Persist default staff/users on first run so they sync to other devices
         if (!this.loadData('staff')) this.saveData('staff', this.staff);
+        if (!this.loadData('users')) this.saveData('users', this.users);
         this.renderStaff();
+        this.renderUsers();
         this.loadHistory();
         this.loadPreferences();
         this.loadApprovalSettings();
@@ -654,6 +674,7 @@ class OrderSystem {
         this.updateApprovalsBadge();
         this.renderNeeds();
         this.updateNeedsBadge();
+        this.renderUsers();
         this.loadApprovalSettings(); // repopulate phone/procurement inputs from adopted settings
         if (typeof authSystem !== 'undefined' && authSystem) authSystem.populateLoginNames();
         // Re-render the order products only if the user hasn't started an order (don't wipe quantities)
@@ -783,7 +804,15 @@ class OrderSystem {
 
         const addStaffBtn = document.getElementById('add-staff-btn');
         if (addStaffBtn) addStaffBtn.addEventListener('click', () => this.addStaff());
-        
+
+        // User management
+        const addUserBtn = document.getElementById('add-user-btn');
+        if (addUserBtn) addUserBtn.addEventListener('click', () => this.addUser());
+        const saveUserBtn = document.getElementById('save-user-btn');
+        if (saveUserBtn) saveUserBtn.addEventListener('click', () => this.saveUserEdit());
+        const cancelUserEditBtn = document.getElementById('cancel-user-edit-btn');
+        if (cancelUserEditBtn) cancelUserEditBtn.addEventListener('click', () => this.closeUserEditModal());
+
         // Excel import
         const excelFile = document.getElementById('excel-file');
         const importProductsBtn = document.getElementById('import-products-btn');
@@ -1614,6 +1643,102 @@ class OrderSystem {
         this.renderStaff();
         if (typeof authSystem !== 'undefined' && authSystem) authSystem.populateLoginNames();
         this.showAlert('נמחק מהצוות', 'success');
+    }
+
+    // ===========================
+    // User management (name + password + role) — chef-controlled login accounts
+    // ===========================
+
+    roleLabel(role) {
+        return role === 'admin' ? '👑 מנהל (שף)' : '👤 עובד';
+    }
+
+    renderUsers() {
+        const container = document.getElementById('users-list');
+        if (!container) return;
+        if (!this.users.length) {
+            container.innerHTML = '<p class="alert alert-info">אין משתמשים</p>';
+            return;
+        }
+        container.innerHTML = '';
+        this.users.forEach(u => {
+            const row = document.createElement('div');
+            row.className = 'user-row';
+            row.innerHTML = `
+                <span class="user-row-name">${u.name}</span>
+                <span class="user-row-role">${this.roleLabel(u.role)}</span>
+                <button class="btn btn-primary btn-small" onclick="orderSystem.editUser('${u.id}')">✏️</button>
+                <button class="btn btn-secondary btn-small" onclick="orderSystem.deleteUser('${u.id}')">🗑️</button>
+            `;
+            container.appendChild(row);
+        });
+    }
+
+    addUser() {
+        const nameEl = document.getElementById('user-name-input');
+        const passEl = document.getElementById('user-password-input');
+        const roleEl = document.getElementById('user-role-input');
+        const name = nameEl.value.trim();
+        const password = passEl.value.trim();
+        const role = roleEl.value;
+
+        if (!name || !password) { alert('נא למלא שם וסיסמה'); return; }
+        if (this.users.some(u => u.name === name)) { alert('כבר קיים משתמש עם השם הזה'); return; }
+
+        this.users.push({ id: 'u' + Date.now(), name, password, role });
+        this.saveData('users', this.users);
+        nameEl.value = ''; passEl.value = '';
+        this.renderUsers();
+        if (typeof authSystem !== 'undefined' && authSystem) authSystem.populateLoginNames();
+        this.showAlert('✅ המשתמש נוסף', 'success');
+    }
+
+    editUser(id) {
+        const user = this.users.find(u => u.id === id);
+        if (!user) return;
+        document.getElementById('edit-user-id').value = user.id;
+        document.getElementById('edit-user-name').value = user.name;
+        document.getElementById('edit-user-password').value = user.password;
+        document.getElementById('edit-user-role').value = user.role;
+        document.getElementById('edit-user-modal').classList.add('active');
+    }
+
+    saveUserEdit() {
+        const id = document.getElementById('edit-user-id').value;
+        const user = this.users.find(u => u.id === id);
+        if (!user) return;
+        const name = document.getElementById('edit-user-name').value.trim();
+        const password = document.getElementById('edit-user-password').value.trim();
+        if (!name || !password) { alert('נא למלא שם וסיסמה'); return; }
+        if (this.users.some(u => u.id !== id && u.name === name)) { alert('כבר קיים משתמש אחר עם השם הזה'); return; }
+
+        user.name = name;
+        user.password = password;
+        user.role = document.getElementById('edit-user-role').value;
+        this.saveData('users', this.users);
+        this.closeUserEditModal();
+        this.renderUsers();
+        if (typeof authSystem !== 'undefined' && authSystem) authSystem.populateLoginNames();
+        this.showAlert('✅ המשתמש עודכן', 'success');
+    }
+
+    closeUserEditModal() {
+        document.getElementById('edit-user-modal').classList.remove('active');
+    }
+
+    deleteUser(id) {
+        const admins = this.users.filter(u => u.role === 'admin');
+        const target = this.users.find(u => u.id === id);
+        if (target && target.role === 'admin' && admins.length <= 1) {
+            alert('לא ניתן למחוק את המנהל האחרון');
+            return;
+        }
+        if (!confirm('למחוק את המשתמש?')) return;
+        this.users = this.users.filter(u => u.id !== id);
+        this.saveData('users', this.users);
+        this.renderUsers();
+        if (typeof authSystem !== 'undefined' && authSystem) authSystem.populateLoginNames();
+        this.showAlert('המשתמש נמחק', 'success');
     }
 
     // ===========================
