@@ -349,9 +349,10 @@ class AuthSystem {
                     orderSystem.updateApprovalsBadge();
                 }
 
-                // Show order-day reminder once logged in
+                // Show order-day reminder + dashboard once logged in
                 if (typeof orderSystem !== 'undefined' && orderSystem) {
                     orderSystem.checkOrderReminders();
+                    orderSystem.renderDashboard();
                 }
             }
         }
@@ -559,6 +560,7 @@ class OrderSystem {
         this.setDefaultDeliveryDate();
         this.updateApprovalsBadge();
         this.updateNeedsBadge();
+        this.renderDashboard();
         this.renderWeekdayPicker('supplier-order-days', []);
         this.checkOrderReminders();
         this.setupPush();
@@ -675,6 +677,7 @@ class OrderSystem {
         this.renderNeeds();
         this.updateNeedsBadge();
         this.renderUsers();
+        this.renderDashboard();
         this.loadApprovalSettings(); // repopulate phone/procurement inputs from adopted settings
         if (typeof authSystem !== 'undefined' && authSystem) authSystem.populateLoginNames();
         // Re-render the order products only if the user hasn't started an order (don't wipe quantities)
@@ -870,6 +873,66 @@ class OrderSystem {
             if (invSel && invSel.value) this.renderInventory(invSel.value);
         }
         if (tabName === 'needs') this.renderNeeds();
+        if (tabName === 'dashboard') this.renderDashboard();
+    }
+
+    // ===========================
+    // Dashboard (home screen)
+    // ===========================
+
+    goToOrder(supplierId) {
+        this.switchTab('order');
+        const sel = document.getElementById('supplier-select');
+        if (sel) { sel.value = supplierId; this.onSupplierChange(supplierId); }
+    }
+
+    renderDashboard() {
+        const el = document.getElementById('dashboard-content');
+        if (!el) return;
+
+        const isAdmin = (typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.role === 'admin');
+        const userName = (typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.name) ? authSystem.currentUser.name : '';
+        const today = new Date().getDay();
+        const dayName = this.getWeekdays()[today].name;
+
+        const dueSuppliers = this.suppliers.filter(s => Array.isArray(s.orderDays) && s.orderDays.includes(today));
+        const dueHtml = dueSuppliers.length === 0
+            ? '<p class="dash-empty">אין ספקים מתוזמנים להיום</p>'
+            : dueSuppliers.map(s => `<button class="dash-supplier" onclick="orderSystem.goToOrder('${s.id}')">🛒 ${s.name}</button>`).join('');
+
+        const recentHtml = this.history.length === 0
+            ? '<p class="dash-empty">אין הזמנות עדיין</p>'
+            : this.history.slice(0, 4).map(h => {
+                const d = new Date(h.date).toLocaleDateString('he-IL');
+                return `<div class="dash-recent"><span>🛒 ${h.supplier}</span><span>${d} · ${h.items.length} פריטים</span></div>`;
+            }).join('');
+
+        const approvalsStat = isAdmin
+            ? `<div class="dash-stat" onclick="orderSystem.switchTab('approvals')"><div class="dash-stat-num">${this.pendingOrders.length}</div><div class="dash-stat-label">✅ אישורים ממתינים</div></div>`
+            : `<div class="dash-stat dash-stat-static"><div class="dash-stat-num">${this.pendingOrders.length}</div><div class="dash-stat-label">✅ ממתינים לאישור</div></div>`;
+
+        el.innerHTML = `
+            <h2>🏠 שלום${userName ? ' ' + userName : ''}!</h2>
+            <p class="help-text">יום ${dayName} · ${new Date().toLocaleDateString('he-IL')}</p>
+
+            <div class="dash-stats">
+                ${approvalsStat}
+                <div class="dash-stat" onclick="orderSystem.switchTab('needs')">
+                    <div class="dash-stat-num">${this.needs.length}</div>
+                    <div class="dash-stat-label">🚩 חוסרים פתוחים</div>
+                </div>
+            </div>
+
+            <div class="dash-block">
+                <h3>📅 להזמין היום</h3>
+                <div class="dash-due">${dueHtml}</div>
+            </div>
+
+            <div class="dash-block">
+                <h3>📋 הזמנות אחרונות</h3>
+                ${recentHtml}
+            </div>
+        `;
     }
 
     // ===========================
