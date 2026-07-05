@@ -841,6 +841,12 @@ class OrderSystem {
         const clearHistoryBtn = document.getElementById('clear-history-btn');
         if (clearHistoryBtn) clearHistoryBtn.addEventListener('click', () => this.clearHistory());
 
+        // Receiving modal
+        const confirmReceiveBtn = document.getElementById('confirm-receive-btn');
+        if (confirmReceiveBtn) confirmReceiveBtn.addEventListener('click', () => this.confirmReceiveOrder());
+        const cancelReceiveBtn = document.getElementById('cancel-receive-btn');
+        if (cancelReceiveBtn) cancelReceiveBtn.addEventListener('click', () => this.closeReceiveModal());
+
         // Reminder banner
         const enableNotifBtn = document.getElementById('enable-notifications-btn');
         if (enableNotifBtn) enableNotifBtn.addEventListener('click', () => this.enableNotifications());
@@ -2941,6 +2947,63 @@ class OrderSystem {
         `;
     }
 
+    // ===========================
+    // Receiving (mark what arrived → update inventory stock)
+    // ===========================
+
+    receiveOrder(orderId) {
+        const order = this.history.find(h => h.id === orderId);
+        if (!order) return;
+        document.getElementById('receive-order-id').value = orderId;
+        document.getElementById('receive-order-info').textContent = `ספק: ${order.supplier} · ${new Date(order.date).toLocaleDateString('he-IL')}`;
+        const container = document.getElementById('receive-items');
+        container.innerHTML = (order.items || []).map((it, idx) => `
+            <div class="receive-row">
+                <span class="receive-name">${it.product}</span>
+                <span class="receive-ordered">הוזמן: ${it.quantity} ${it.unit}</span>
+                <input type="number" class="input-field receive-input" data-idx="${idx}" min="0" step="0.5" value="${it.quantity}" inputmode="decimal">
+            </div>
+        `).join('');
+        document.getElementById('receive-modal').classList.add('active');
+    }
+
+    confirmReceiveOrder() {
+        const orderId = document.getElementById('receive-order-id').value;
+        const order = this.history.find(h => h.id === orderId);
+        if (!order) return;
+
+        const supplier = this.suppliers.find(s => s.name === order.supplier);
+        let stockUpdated = 0;
+        document.querySelectorAll('#receive-items .receive-input').forEach(inp => {
+            const idx = parseInt(inp.dataset.idx, 10);
+            const received = parseFloat(inp.value) || 0;
+            const it = order.items[idx];
+            if (!it) return;
+            it.received = received;
+            if (supplier && !it.manual) {
+                const prod = this.products.find(p => p.supplierId === supplier.id && p.name === it.product);
+                if (prod) { prod.stockQty = (Number(prod.stockQty) || 0) + received; stockUpdated++; }
+            }
+        });
+
+        order.received = true;
+        order.receivedDate = new Date().toISOString();
+        order.receivedBy = (typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.name) ? authSystem.currentUser.name : '';
+
+        this.saveData('history', this.history);
+        if (stockUpdated > 0) this.saveData('products', this.products);
+
+        this.closeReceiveModal();
+        this.loadHistory();
+        const invSel = document.getElementById('inventory-supplier-select');
+        if (invSel && invSel.value) this.renderInventory(invSel.value);
+        this.showAlert(`📥 הסחורה התקבלה. עודכן מלאי ל-${stockUpdated} פריטים.`, 'success');
+    }
+
+    closeReceiveModal() {
+        document.getElementById('receive-modal').classList.remove('active');
+    }
+
     loadHistory() {
         this.renderExpenseSummary();
         const container = document.getElementById('history-list');
@@ -2978,7 +3041,14 @@ class OrderSystem {
             if (item.createdByName) {
                 html += `<div class="history-items">👤 הוזמן ע"י: ${item.createdByName}${item.approvedByName ? ` · אושר ע"י: ${item.approvedByName}` : ''}</div>`;
             }
+            if (item.received) {
+                const rDate = item.receivedDate ? new Date(item.receivedDate).toLocaleDateString('he-IL') : '';
+                html += `<div class="history-items" style="color:#2e7d32;font-weight:700;">📥 התקבל${rDate ? ' · ' + rDate : ''}${item.receivedBy ? ' · ' + item.receivedBy : ''}</div>`;
+            }
             html += `<button class="btn btn-small" style="background:#2196F3;color:#fff;margin-top:8px;" onclick="orderSystem.printHistoryOrder('${item.id}')">🖨️ הדפס / שמור</button>`;
+            if (!item.received) {
+                html += `<button class="btn btn-small" style="background:#4CAF50;color:#fff;margin-top:8px;" onclick="orderSystem.receiveOrder('${item.id}')">📥 קבל סחורה</button>`;
+            }
 
             historyCard.innerHTML = html;
             container.appendChild(historyCard);

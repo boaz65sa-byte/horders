@@ -470,6 +470,21 @@
         </div>
     </div>
 
+    <!-- Receive Order Modal -->
+    <div id="receive-modal" class="modal">
+        <div class="modal-content">
+            <h2>📥 קבלת סחורה</h2>
+            <input type="hidden" id="receive-order-id">
+            <p class="help-text" id="receive-order-info"></p>
+            <p class="help-text">עדכן כמה התקבל בפועל מכל פריט. הכמות שהתקבלה תתווסף למלאי (כמות קיים).</p>
+            <div id="receive-items"></div>
+            <div class="modal-actions">
+                <button id="confirm-receive-btn" class="btn btn-primary">✅ אשר קבלה</button>
+                <button id="cancel-receive-btn" class="btn btn-secondary">❌ ביטול</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Shared hidden input for product image upload (camera/gallery on mobile) -->
     <input type="file" id="product-image-input" accept="image/*" capture="environment" style="display: none;">
 

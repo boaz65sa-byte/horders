@@ -1295,3 +1295,16 @@ label {
     border-bottom: 1px solid #eee;
 }
 .dash-recent:last-child { border-bottom: none; }
+
+/* Receiving modal rows */
+.receive-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid #eee;
+    flex-wrap: wrap;
+}
+.receive-name { flex: 1; font-weight: 600; color: #333; min-width: 100px; }
+.receive-ordered { color: #888; font-size: 13px; }
+.receive-input { width: 80px; margin: 0; text-align: center; }
