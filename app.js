@@ -2655,7 +2655,8 @@ class OrderSystem {
             items,
             showPrices,
             orderedBy,
-            approvedBy
+            approvedBy,
+            note
         } = opts;
 
         const orderDateStr = orderDate
@@ -2678,6 +2679,7 @@ class OrderSystem {
         text += `תאריך אספקה מבוקש: ${deliveryStr}\n`;
         if (orderedBy) text += `הוזמן ע"י: ${orderedBy}\n`;
         if (approvedBy) text += `אושר ע"י: ${approvedBy}\n`;
+        if (note) text += `📝 הערה: ${note}\n`;
         text += `\n`;
         text += '#  | מק"ט    | שם פריט              | כמות | יחידה  | מלאי | פתיחה';
         if (showPrices) text += ' | מחיר   | סה"כ';
@@ -2735,7 +2737,8 @@ class OrderSystem {
             ['תאריך הזמנה', `${orderDateStr} · ${orderTimeStr}`],
             ['תאריך אספקה מבוקש', deliveryStr],
             orderedBy ? ['הוזמן ע"י', orderedBy] : null,
-            approvedBy ? ['אושר ע"י', approvedBy] : null
+            approvedBy ? ['אושר ע"י', approvedBy] : null,
+            note ? ['📝 הערה', note] : null
         ].filter(Boolean).map(([k, v]) =>
             `<tr><td style="padding:6px 12px;color:#555;font-weight:600;width:140px">${this.escapeHtml(k)}</td>
              <td style="padding:6px 12px;font-weight:700">${this.escapeHtml(v)}</td></tr>`
@@ -2789,13 +2792,15 @@ class OrderSystem {
         const orderedBy = (typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.name)
             ? authSystem.currentUser.name : '';
 
+        const noteEl = document.getElementById('order-note');
         return this.buildOrderEmailContent({
             supplierName: supplier.name,
             deliveryDate: document.getElementById('delivery-date').value,
             orderDate: new Date().toISOString(),
             items: orderItems,
             showPrices: this.preferences.showPrices,
-            orderedBy
+            orderedBy,
+            note: noteEl ? noteEl.value.trim() : ''
         });
     }
 
@@ -3145,6 +3150,8 @@ class OrderSystem {
         this.manualItems = [];
         this.renderManualItems();
         this.currentOrder = [];
+        const noteEl = document.getElementById('order-note');
+        if (noteEl) noteEl.value = '';
         productIds.forEach(id => this.syncProductCardFromCart(id));
         this.updateOrderSummary();
     }
