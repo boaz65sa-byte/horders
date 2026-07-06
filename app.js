@@ -510,6 +510,7 @@ class AuthSystem {
 class OrderSystem {
     constructor() {
         this.suppliers = this.loadData('suppliers') || this.getDefaultSuppliers();
+        this.normalizeSuppliers();
         this.products = this.loadData('products') || this.getDefaultProducts();
         this.history = this.loadData('history') || [];
         this.pendingOrders = this.loadData('pendingOrders') || [];
@@ -571,6 +572,12 @@ class OrderSystem {
     // ===========================
     // Default Data
     // ===========================
+
+    normalizeSuppliers() {
+        this.suppliers.forEach(s => {
+            if (s.agentPhone === undefined) s.agentPhone = '';
+        });
+    }
 
     getDefaultSuppliers() {
         return [
@@ -668,6 +675,7 @@ class OrderSystem {
 
     // Re-render all views after adopting shared data
     rerenderAll() {
+        this.normalizeSuppliers();
         this.loadSupplierSelects();
         this.loadSuppliersDisplay();
         this.renderAllProducts();
@@ -1071,7 +1079,8 @@ class OrderSystem {
                         <button class="btn btn-secondary btn-small" onclick="orderSystem.deleteSupplier('${supplier.id}')">🗑️ מחק</button>
                     </div>
                 </div>
-                <div class="supplier-info">📞 ${supplier.phone}</div>
+                <div class="supplier-info">📞 טלפון ראשי: ${supplier.phone || '—'}</div>
+                <div class="supplier-info">👤 טלפון סוכן: ${supplier.agentPhone || '—'}</div>
                 <div class="supplier-info">📧 ${supplier.email || '—'}${this.isPlaceholderEmail(supplier.email) ? ' <span style="color:#e65100;font-weight:700">⚠️ עדכן למייל אמיתי</span>' : ''}</div>
                 <div class="supplier-info">🏷️ ${supplier.category}</div>
                 ${supplier.orderDays && supplier.orderDays.length ? `<div class="supplier-info">📅 ימי הזמנה: ${this.formatOrderDays(supplier.orderDays)}</div>` : ''}
@@ -1080,14 +1089,26 @@ class OrderSystem {
         });
     }
 
+    getSupplierWhatsAppPhone(supplier) {
+        if (!supplier) return '';
+        const agent = String(supplier.agentPhone || '').trim();
+        const main = String(supplier.phone || '').trim();
+        return agent || main;
+    }
+
     addSupplier() {
         const name = document.getElementById('supplier-name').value.trim();
         const phone = document.getElementById('supplier-phone').value.trim();
+        const agentPhone = document.getElementById('supplier-agent-phone').value.trim();
         const email = document.getElementById('supplier-email').value.trim();
         const category = document.getElementById('supplier-category').value.trim();
 
-        if (!name || !phone) {
-            alert('נא למלא לפחות שם וטלפון');
+        if (!name) {
+            alert('נא למלא שם ספק');
+            return;
+        }
+        if (!phone && !agentPhone && !email) {
+            alert('נא למלא לפחות טלפון, טלפון סוכן או מייל');
             return;
         }
 
@@ -1095,6 +1116,7 @@ class OrderSystem {
             id: Date.now().toString(),
             name,
             phone,
+            agentPhone,
             email,
             category,
             orderDays: this.getSelectedWeekdays('supplier-order-days')
@@ -1108,6 +1130,7 @@ class OrderSystem {
         // Clear form
         document.getElementById('supplier-name').value = '';
         document.getElementById('supplier-phone').value = '';
+        document.getElementById('supplier-agent-phone').value = '';
         document.getElementById('supplier-email').value = '';
         document.getElementById('supplier-category').value = '';
         this.renderWeekdayPicker('supplier-order-days', []);
@@ -1122,8 +1145,9 @@ class OrderSystem {
 
         document.getElementById('edit-supplier-id').value = supplier.id;
         document.getElementById('edit-supplier-name').value = supplier.name;
-        document.getElementById('edit-supplier-phone').value = supplier.phone;
-        document.getElementById('edit-supplier-email').value = supplier.email;
+        document.getElementById('edit-supplier-phone').value = supplier.phone || '';
+        document.getElementById('edit-supplier-agent-phone').value = supplier.agentPhone || '';
+        document.getElementById('edit-supplier-email').value = supplier.email || '';
         document.getElementById('edit-supplier-category').value = supplier.category;
         this.renderWeekdayPicker('edit-supplier-order-days', supplier.orderDays || []);
 
@@ -1138,6 +1162,7 @@ class OrderSystem {
 
         supplier.name = document.getElementById('edit-supplier-name').value.trim();
         supplier.phone = document.getElementById('edit-supplier-phone').value.trim();
+        supplier.agentPhone = document.getElementById('edit-supplier-agent-phone').value.trim();
         supplier.email = document.getElementById('edit-supplier-email').value.trim();
         supplier.category = document.getElementById('edit-supplier-category').value.trim();
         supplier.orderDays = this.getSelectedWeekdays('edit-supplier-order-days');
@@ -2106,27 +2131,49 @@ class OrderSystem {
 
         const supplierId = document.getElementById('supplier-select').value;
         const supplier = this.suppliers.find(s => s.id === supplierId);
-        const wantsEmail = this.preferences.sendMethod === 'email' || this.preferences.sendMethod === 'both';
-
-        if (!supplier || !wantsEmail) {
+        if (!supplier) {
             box.style.display = 'none';
             return;
         }
 
-        const err = this.validateSupplierEmail(supplier.email);
-        if (err) {
-            box.className = 'alert alert-info';
-            box.style.display = 'block';
-            box.style.borderColor = '#e65100';
-            box.style.background = '#fff3e0';
-            box.innerHTML = `⚠️ ${err}<br><button type="button" class="btn btn-primary btn-small" style="margin-top:8px" onclick="orderSystem.editSupplier('${supplier.id}')">✏️ עדכן מייל ספק עכשיו</button>`;
-        } else {
-            box.className = 'alert alert-info';
-            box.style.display = 'block';
-            box.style.borderColor = '';
-            box.style.background = '';
-            box.textContent = `📧 ההזמנה תישלח ל: ${supplier.email}`;
+        const wantsEmail = this.preferences.sendMethod === 'email' || this.preferences.sendMethod === 'both';
+        const wantsWhatsApp = this.preferences.sendMethod === 'whatsapp' || this.preferences.sendMethod === 'both';
+        const lines = [];
+        let hasError = false;
+
+        if (wantsWhatsApp) {
+            const waPhone = this.getSupplierWhatsAppPhone(supplier);
+            if (!waPhone) {
+                lines.push('⚠️ חסר טלפון לשליחת WhatsApp — הזן טלפון סוכן או טלפון ראשי');
+                hasError = true;
+            } else {
+                const label = supplier.agentPhone ? 'סוכן' : 'ראשי';
+                lines.push(`📱 WhatsApp יישלח ל: ${waPhone} (${label})`);
+            }
         }
+
+        if (wantsEmail) {
+            const err = this.validateSupplierEmail(supplier.email);
+            if (err) {
+                lines.push(`⚠️ ${err}`);
+                hasError = true;
+            } else {
+                lines.push(`📧 מייל יישלח ל: ${supplier.email}`);
+            }
+        }
+
+        if (!wantsEmail && !wantsWhatsApp) {
+            box.style.display = 'none';
+            return;
+        }
+
+        box.className = 'alert alert-info';
+        box.style.display = 'block';
+        box.style.borderColor = hasError ? '#e65100' : '';
+        box.style.background = hasError ? '#fff3e0' : '';
+        box.innerHTML = lines.join('<br>') + (hasError
+            ? `<br><button type="button" class="btn btn-primary btn-small" style="margin-top:8px" onclick="orderSystem.editSupplier('${supplier.id}')">✏️ עדכן פרטי ספק</button>`
+            : '');
     }
 
     // Pre-fill the order with the quantities from this supplier's most recent order
@@ -2833,7 +2880,12 @@ class OrderSystem {
             id: Date.now().toString(),
             date: new Date().toISOString(),
             supplierId: supplier.id,
-            supplierSnapshot: { name: supplier.name, phone: supplier.phone, email: supplier.email },
+            supplierSnapshot: {
+                name: supplier.name,
+                phone: supplier.phone,
+                agentPhone: supplier.agentPhone || '',
+                email: supplier.email
+            },
             items: orderItems,
             message: message,
             deliveryDate: deliveryDate,
@@ -2871,11 +2923,11 @@ class OrderSystem {
         const subject = emailPayload && emailPayload.subject ? emailPayload.subject : null;
 
         if (sendMethod === 'whatsapp') {
-            this.openWhatsApp(supplier.phone, message);
+            this.openWhatsApp(this.getSupplierWhatsAppPhone(supplier), message);
         } else if (sendMethod === 'email') {
             await this.sendEmail(supplier.email, message, procurementEmail, html, subject);
         } else if (sendMethod === 'both') {
-            this.openWhatsApp(supplier.phone, message);
+            this.openWhatsApp(this.getSupplierWhatsAppPhone(supplier), message);
             await new Promise(r => setTimeout(r, 800));
             await this.sendEmail(supplier.email, message, procurementEmail, html, subject);
         }

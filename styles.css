@@ -1386,3 +1386,20 @@ label {
 .receive-name { flex: 1; font-weight: 600; color: #333; min-width: 100px; }
 .receive-ordered { color: #888; font-size: 13px; }
 .receive-input { width: 80px; margin: 0; text-align: center; }
+
+/* Global search results (dashboard) */
+.gsearch-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: #fff;
+    border: 1px solid #eee;
+    border-radius: 8px;
+    margin-bottom: 6px;
+    cursor: pointer;
+}
+.gsearch-row:active { transform: scale(0.99); }
+.gsearch-name { font-weight: 600; color: #333; }
+.gsearch-sup { color: #E65100; font-size: 13px; white-space: nowrap; }
