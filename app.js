@@ -853,6 +853,12 @@ class OrderSystem {
         const clearHistoryBtn = document.getElementById('clear-history-btn');
         if (clearHistoryBtn) clearHistoryBtn.addEventListener('click', () => this.clearHistory());
 
+        // Excel export
+        const exportHistoryBtn = document.getElementById('export-history-btn');
+        if (exportHistoryBtn) exportHistoryBtn.addEventListener('click', () => this.exportHistoryExcel());
+        const exportInventoryBtn = document.getElementById('export-inventory-btn');
+        if (exportInventoryBtn) exportInventoryBtn.addEventListener('click', () => this.exportInventoryExcel());
+
         // Receiving modal
         const confirmReceiveBtn = document.getElementById('confirm-receive-btn');
         if (confirmReceiveBtn) confirmReceiveBtn.addEventListener('click', () => this.confirmReceiveOrder());
@@ -3592,6 +3598,65 @@ class OrderSystem {
 
     closeReceiveModal() {
         document.getElementById('receive-modal').classList.remove('active');
+    }
+
+    // ===========================
+    // Excel export (uses the already-loaded SheetJS / XLSX)
+    // ===========================
+
+    exportHistoryExcel() {
+        if (typeof XLSX === 'undefined') { alert('רכיב הייצוא לא נטען, נסה לרענן'); return; }
+        if (!this.history.length) { alert('אין היסטוריה לייצוא'); return; }
+
+        const rows = [];
+        this.history.forEach(h => {
+            const dateStr = new Date(h.date).toLocaleDateString('he-IL');
+            (h.items || []).forEach(it => {
+                rows.push({
+                    'תאריך': dateStr,
+                    'ספק': h.supplier,
+                    'מוצר': it.product,
+                    'כמות': it.quantity,
+                    'יחידה': it.unit,
+                    'מחיר': it.price || 0,
+                    'סה"כ': it.total != null ? it.total : (it.price || 0) * it.quantity,
+                    'התקבל': (it.received != null ? it.received : ''),
+                    'הוזמן ע"י': h.createdByName || '',
+                    'סטטוס': h.received ? 'התקבל' : 'נשלח'
+                });
+            });
+        });
+
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'הזמנות');
+        XLSX.writeFile(wb, `הזמנות-${new Date().toISOString().slice(0, 10)}.xlsx`);
+        this.showAlert(`📄 יוצאו ${rows.length} שורות לאקסל`, 'success');
+    }
+
+    exportInventoryExcel() {
+        if (typeof XLSX === 'undefined') { alert('רכיב הייצוא לא נטען, נסה לרענן'); return; }
+        const sid = document.getElementById('inventory-supplier-select').value;
+        const supName = {};
+        this.suppliers.forEach(s => { supName[s.id] = s.name; });
+        const products = sid ? this.products.filter(p => p.supplierId === sid) : this.products;
+        if (!products.length) { alert('אין מוצרים לייצוא'); return; }
+
+        const rows = products.map(p => ({
+            'ספק': supName[p.supplierId] || '',
+            'מוצר': p.name,
+            'כמות קיים': Number(p.stockQty) || 0,
+            'מלאי פתיחה': Number(p.parLevel) || 0,
+            'כמות להזמנה': this.productShortage(p),
+            'מחיר': p.price || 0
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'מלאי');
+        const label = sid ? (supName[sid] || 'ספק') : 'כל-הספקים';
+        XLSX.writeFile(wb, `מלאי-${label}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+        this.showAlert(`📄 יוצאו ${rows.length} מוצרים לאקסל`, 'success');
     }
 
     loadHistory() {
