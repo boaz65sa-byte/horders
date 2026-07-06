@@ -1403,3 +1403,8 @@ label {
 .gsearch-row:active { transform: scale(0.99); }
 .gsearch-name { font-weight: 600; color: #333; }
 .gsearch-sup { color: #E65100; font-size: 13px; white-space: nowrap; }
+
+/* Low-stock rows on dashboard */
+.lowstock-row { cursor: pointer; }
+.lowstock-row:active { background: #fff8f0; }
+.lowstock-sup { color: #E65100; font-size: 12px; }

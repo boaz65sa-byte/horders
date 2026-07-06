@@ -958,6 +958,20 @@ class OrderSystem {
             ? `<div class="dash-stat" onclick="orderSystem.switchTab('approvals')"><div class="dash-stat-num">${this.pendingOrders.length}</div><div class="dash-stat-label">✅ אישורים ממתינים</div></div>`
             : `<div class="dash-stat dash-stat-static"><div class="dash-stat-num">${this.pendingOrders.length}</div><div class="dash-stat-label">✅ ממתינים לאישור</div></div>`;
 
+        // Low stock: items with a par level set whose current stock is below it
+        const supName = {};
+        this.suppliers.forEach(s => { supName[s.id] = s.name; });
+        const lowStock = this.products
+            .filter(p => (Number(p.parLevel) || 0) > 0 && this.productShortage(p) > 0)
+            .sort((a, b) => this.productShortage(b) - this.productShortage(a));
+        const lowStockHtml = lowStock.length === 0
+            ? '<p class="dash-empty">אין מוצרים מתחת ליעד המלאי 👍</p>'
+            : lowStock.slice(0, 15).map(p =>
+                `<div class="dash-recent lowstock-row" onclick="orderSystem.goToOrderForProduct('${p.id}')">
+                    <span>⚠️ ${p.name} <span class="lowstock-sup">(${supName[p.supplierId] || ''})</span></span>
+                    <span>קיים ${Number(p.stockQty) || 0} / יעד ${Number(p.parLevel) || 0} · חסר ${this.productShortage(p)}</span>
+                </div>`).join('');
+
         el.innerHTML = `
             <h2>🏠 שלום${userName ? ' ' + userName : ''}!</h2>
             <p class="help-text">יום ${dayName} · ${new Date().toLocaleDateString('he-IL')}</p>
@@ -974,11 +988,20 @@ class OrderSystem {
                     <div class="dash-stat-num">${this.needs.length}</div>
                     <div class="dash-stat-label">🚩 חוסרים פתוחים</div>
                 </div>
+                <div class="dash-stat${lowStock.length ? '' : ' dash-stat-static'}" onclick="orderSystem.switchTab('inventory')" style="${lowStock.length ? 'background:linear-gradient(135deg,#FF9800,#F57C00)' : ''}">
+                    <div class="dash-stat-num">${lowStock.length}</div>
+                    <div class="dash-stat-label">⚠️ מלאי נמוך</div>
+                </div>
             </div>
 
             <div class="dash-block">
                 <h3>📅 להזמין היום</h3>
                 <div class="dash-due">${dueHtml}</div>
+            </div>
+
+            <div class="dash-block">
+                <h3>⚠️ מלאי מתחת ליעד</h3>
+                ${lowStockHtml}
             </div>
 
             <div class="dash-block">
