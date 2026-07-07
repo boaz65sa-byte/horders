@@ -859,6 +859,12 @@ class OrderSystem {
         const exportInventoryBtn = document.getElementById('export-inventory-btn');
         if (exportInventoryBtn) exportInventoryBtn.addEventListener('click', () => this.exportInventoryExcel());
 
+        // Batch (FIFO) modal
+        const addBatchBtn = document.getElementById('add-batch-btn');
+        if (addBatchBtn) addBatchBtn.addEventListener('click', () => this.addBatch());
+        const closeBatchBtn = document.getElementById('close-batch-btn');
+        if (closeBatchBtn) closeBatchBtn.addEventListener('click', () => this.closeBatchManager());
+
         // Receiving modal
         const confirmReceiveBtn = document.getElementById('confirm-receive-btn');
         if (confirmReceiveBtn) confirmReceiveBtn.addEventListener('click', () => this.confirmReceiveOrder());
@@ -978,21 +984,30 @@ class OrderSystem {
                     <span>קיים ${Number(p.stockQty) || 0} / יעד ${Number(p.parLevel) || 0} · חסר ${this.productShortage(p)}</span>
                 </div>`).join('');
 
-        // Expiry / FIFO: products with an expiry date, earliest first (use-first order)
-        const withExpiry = this.products
-            .filter(p => p.expiryDate)
-            .map(p => ({ p, days: this.expiryDays(p.expiryDate) }))
-            .filter(x => x.days !== null)
-            .sort((a, b) => a.days - b.days);
-        const expirySoon = withExpiry.filter(x => x.days <= 7);
+        // Expiry / FIFO: one entry per batch (or per product's single date), earliest first
+        const expiryEntries = [];
+        this.products.forEach(p => {
+            if (p.batches && p.batches.length) {
+                p.batches.forEach(b => {
+                    if (!b.expiryDate) return;
+                    const days = this.expiryDays(b.expiryDate);
+                    if (days !== null) expiryEntries.push({ p, expiryDate: b.expiryDate, qty: b.qty, days });
+                });
+            } else if (p.expiryDate) {
+                const days = this.expiryDays(p.expiryDate);
+                if (days !== null) expiryEntries.push({ p, expiryDate: p.expiryDate, qty: Number(p.stockQty) || 0, days });
+            }
+        });
+        expiryEntries.sort((a, b) => a.days - b.days);
+        const expirySoon = expiryEntries.filter(x => x.days <= 7);
         const expiryHtml = expirySoon.length === 0
             ? '<p class="dash-empty">אין מוצרים בסמוך לתפוגה 👍</p>'
-            : expirySoon.slice(0, 15).map(({ p, days }) => {
+            : expirySoon.slice(0, 15).map(({ p, expiryDate, qty, days }) => {
                 const cls = days < 0 ? 'exp-expired' : 'exp-soon';
                 const label = days < 0 ? `פג לפני ${-days} ימים` : (days === 0 ? 'פג היום' : `בעוד ${days} ימים`);
                 return `<div class="dash-recent lowstock-row" onclick="orderSystem.goToOrderForProduct('${p.id}')">
                     <span>${days < 0 ? '⛔' : '⏳'} ${p.name} <span class="lowstock-sup">(${supName[p.supplierId] || ''})</span></span>
-                    <span class="${cls}">${new Date(p.expiryDate).toLocaleDateString('he-IL')} · ${label}</span>
+                    <span class="${cls}">${new Date(expiryDate).toLocaleDateString('he-IL')} · כמות ${qty} · ${label}</span>
                 </div>`;
             }).join('');
 
@@ -1458,18 +1473,24 @@ class OrderSystem {
             </div>
         `;
         products.forEach(product => {
+            if (product.batches && product.batches.length) this.recomputeStock(product);
             const stock = Number(product.stockQty) || 0;
             const par = Number(product.parLevel) || 0;
             const shortage = Math.max(0, par - stock);
             const parAttrs = isAdmin ? '' : 'disabled';
+            const hasBatches = !!(product.batches && product.batches.length);
+            const batchBtn = `<button class="inv-flag-btn" onclick="orderSystem.openBatchManager('${product.id}')" type="button" title="אצוות / FIFO">📦${hasBatches ? ' ' + product.batches.length : ''}</button>`;
+            const expiryControl = hasBatches
+                ? '<span class="inv-batch-note">אצוות ⬅ 📦</span>'
+                : `<input type="date" class="inv-expiry ${this.expiryClass(product.expiryDate)}" data-product-id="${product.id}" value="${product.expiryDate || ''}" onchange="orderSystem.setInventoryExpiry('${product.id}', this.value)" title="תאריך תפוגה (FIFO)">`;
             html += `
                 <div class="inventory-row" data-name="${product.name.toLowerCase()}">
                     <span class="inv-name">
-                        <span class="inv-name-top">${product.name} <button class="inv-flag-btn" onclick="orderSystem.markShortage('${product.id}')" type="button" title="סמן חסר">🚩</button></span>
-                        <input type="date" class="inv-expiry ${this.expiryClass(product.expiryDate)}" data-product-id="${product.id}" value="${product.expiryDate || ''}" onchange="orderSystem.setInventoryExpiry('${product.id}', this.value)" title="תאריך תפוגה (FIFO)">
+                        <span class="inv-name-top">${product.name} <button class="inv-flag-btn" onclick="orderSystem.markShortage('${product.id}')" type="button" title="סמן חסר">🚩</button>${batchBtn}</span>
+                        ${expiryControl}
                     </span>
                     <span class="inv-col">
-                        <input type="number" class="input-field inv-input inv-stock" data-product-id="${product.id}" min="0" step="0.5" value="${stock}" inputmode="decimal"
+                        <input type="number" class="input-field inv-input inv-stock" data-product-id="${product.id}" min="0" step="0.5" value="${stock}" inputmode="decimal" ${hasBatches ? 'readonly title="מנוהל דרך אצוות (📦)"' : ''}
                                onchange="orderSystem.updateInventoryRow('${product.id}')" oninput="orderSystem.updateInventoryRow('${product.id}')">
                     </span>
                     <span class="inv-col">
@@ -1608,6 +1629,110 @@ class OrderSystem {
         const input = document.querySelector(`.inv-expiry[data-product-id="${productId}"]`);
         if (input) { input.className = `inv-expiry ${this.expiryClass(value)}`; }
         this.renderDashboard();
+    }
+
+    // ===========================
+    // Batches (FIFO — multiple stock lots per product, each with its own expiry)
+    // ===========================
+
+    sortedBatches(product) {
+        const b = (product.batches || []).slice();
+        b.sort((x, y) => {
+            const dx = x.expiryDate ? new Date(x.expiryDate).getTime() : Infinity;
+            const dy = y.expiryDate ? new Date(y.expiryDate).getTime() : Infinity;
+            return dx - dy;
+        });
+        return b;
+    }
+
+    // When a product uses batches, its total stock = sum of batch quantities
+    recomputeStock(product) {
+        if (product.batches && product.batches.length) {
+            product.stockQty = product.batches.reduce((s, x) => s + (Number(x.qty) || 0), 0);
+        }
+    }
+
+    addBatchToProduct(product, qty, expiryDate) {
+        if (!product.batches) product.batches = [];
+        product.batches.push({
+            id: 'b' + Date.now() + Math.random().toString(36).slice(2, 5),
+            qty: Number(qty) || 0,
+            expiryDate: expiryDate || '',
+            receivedDate: new Date().toISOString()
+        });
+        this.recomputeStock(product);
+    }
+
+    openBatchManager(productId) {
+        const product = this.products.find(p => p.id === productId);
+        if (!product) return;
+        document.getElementById('batch-product-id').value = productId;
+        document.getElementById('batch-product-info').textContent = product.name;
+        document.getElementById('batch-qty').value = '';
+        document.getElementById('batch-expiry').value = '';
+        this.renderBatches();
+        document.getElementById('batch-modal').classList.add('active');
+    }
+
+    renderBatches() {
+        const productId = document.getElementById('batch-product-id').value;
+        const product = this.products.find(p => p.id === productId);
+        const el = document.getElementById('batch-list');
+        if (!product || !el) return;
+        const batches = this.sortedBatches(product);
+        if (!batches.length) {
+            el.innerHTML = '<p class="dash-empty">אין אצוות למוצר זה עדיין.</p>';
+            return;
+        }
+        const total = product.batches.reduce((s, x) => s + (Number(x.qty) || 0), 0);
+        el.innerHTML = batches.map((b, i) => {
+            const cls = this.expiryClass(b.expiryDate);
+            const dstr = b.expiryDate ? new Date(b.expiryDate).toLocaleDateString('he-IL') : 'ללא תאריך';
+            const days = this.expiryDays(b.expiryDate);
+            const dlabel = days === null ? '' : (days < 0 ? ` · פג לפני ${-days} ימים` : (days === 0 ? ' · פג היום' : ` · בעוד ${days} ימים`));
+            return `<div class="batch-row ${cls}">
+                <span class="batch-order">${i === 0 ? '⬅ ראשון' : '#' + (i + 1)}</span>
+                <span class="batch-qty">${b.qty}</span>
+                <span class="batch-exp">${dstr}${dlabel}</span>
+                <button class="btn btn-secondary btn-small" onclick="orderSystem.consumeBatch('${b.id}')" title="נוצל / הסר">✔</button>
+            </div>`;
+        }).join('') + `<div class="batch-total">סה"כ מלאי: ${total}</div>`;
+    }
+
+    addBatch() {
+        const productId = document.getElementById('batch-product-id').value;
+        const product = this.products.find(p => p.id === productId);
+        if (!product) return;
+        const qty = parseFloat(document.getElementById('batch-qty').value);
+        const expiry = document.getElementById('batch-expiry').value;
+        if (isNaN(qty) || qty <= 0) { alert('נא להזין כמות'); return; }
+
+        this.addBatchToProduct(product, qty, expiry);
+        this.saveData('products', this.products);
+        document.getElementById('batch-qty').value = '';
+        document.getElementById('batch-expiry').value = '';
+        this.renderBatches();
+        const sid = document.getElementById('inventory-supplier-select').value;
+        if (sid) this.renderInventory(sid);
+        this.renderDashboard();
+    }
+
+    consumeBatch(batchId) {
+        const productId = document.getElementById('batch-product-id').value;
+        const product = this.products.find(p => p.id === productId);
+        if (!product || !product.batches) return;
+        if (!confirm('לסמן את האצווה כנוצלה ולהסיר אותה?')) return;
+        product.batches = product.batches.filter(b => b.id !== batchId);
+        this.recomputeStock(product);
+        this.saveData('products', this.products);
+        this.renderBatches();
+        const sid = document.getElementById('inventory-supplier-select').value;
+        if (sid) this.renderInventory(sid);
+        this.renderDashboard();
+    }
+
+    closeBatchManager() {
+        document.getElementById('batch-modal').classList.remove('active');
     }
 
     // Collect shortages for the selected supplier and pre-fill an order with those amounts.
@@ -2595,11 +2720,7 @@ class OrderSystem {
         if (!btn) return;
         const isAdmin = typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.role === 'admin';
         const count = this.currentOrder.length + this.manualItems.length;
-        if (isAdmin) {
-            btn.textContent = count > 0 ? `✅ אשר ושלח לספק (${count})` : '✅ אשר ושלח לספק';
-        } else {
-            btn.textContent = count > 0 ? `📤 שלח לאישור השף (${count})` : '📤 שלח לאישור השף';
-        }
+        btn.textContent = count > 0 ? `📤 שלח לאישור השף (${count})` : '📤 שלח לאישור השף';
     }
 
     // ===========================
@@ -2927,12 +3048,8 @@ class OrderSystem {
 
     // Route to approval flow or direct send (chef/admin)
     submitOrder() {
-        const isAdmin = typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.role === 'admin';
-        if (isAdmin) {
-            this.submitAndSendDirectly();
-        } else {
-            this.submitForApproval();
-        }
+        // Everyone (including the chef) submits to the chef for approval
+        this.submitForApproval();
     }
 
     // Chef/admin: build order and send immediately without pending step
@@ -3644,7 +3761,8 @@ class OrderSystem {
             <div class="receive-row">
                 <span class="receive-name">${it.product}</span>
                 <span class="receive-ordered">הוזמן: ${it.quantity} ${it.unit}</span>
-                <input type="number" class="input-field receive-input" data-idx="${idx}" min="0" step="0.5" value="${it.quantity}" inputmode="decimal">
+                <input type="number" class="input-field receive-input" data-idx="${idx}" min="0" step="0.5" value="${it.quantity}" inputmode="decimal" title="כמות שהתקבלה">
+                <input type="date" class="input-field receive-expiry" data-idx="${idx}" title="תאריך תפוגה (אצווה)">
             </div>
         `).join('');
         document.getElementById('receive-modal').classList.add('active');
@@ -3660,12 +3778,19 @@ class OrderSystem {
         document.querySelectorAll('#receive-items .receive-input').forEach(inp => {
             const idx = parseInt(inp.dataset.idx, 10);
             const received = parseFloat(inp.value) || 0;
+            const expInp = document.querySelector(`#receive-items .receive-expiry[data-idx="${idx}"]`);
+            const expiry = expInp ? expInp.value : '';
             const it = order.items[idx];
             if (!it) return;
             it.received = received;
-            if (supplier && !it.manual) {
+            it.receivedExpiry = expiry;
+            if (supplier && !it.manual && received > 0) {
                 const prod = this.products.find(p => p.supplierId === supplier.id && p.name === it.product);
-                if (prod) { prod.stockQty = (Number(prod.stockQty) || 0) + received; stockUpdated++; }
+                if (prod) {
+                    // Each received line becomes a FIFO batch (qty + expiry)
+                    this.addBatchToProduct(prod, received, expiry);
+                    stockUpdated++;
+                }
             }
         });
 

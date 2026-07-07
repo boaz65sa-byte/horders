@@ -490,6 +490,31 @@
         </div>
     </div>
 
+    <!-- Batch (FIFO) Manager Modal -->
+    <div id="batch-modal" class="modal">
+        <div class="modal-content">
+            <h2>📦 אצוות מלאי (FIFO)</h2>
+            <input type="hidden" id="batch-product-id">
+            <p class="help-text" id="batch-product-info"></p>
+            <p class="help-text">כל אצווה = כמות + תאריך תפוגה. סה"כ המלאי = סכום האצוות. השתמש מהמוקדם קודם (מסומן ראשון).</p>
+
+            <div id="batch-list"></div>
+
+            <div style="margin-top:14px;border-top:1px solid #eee;padding-top:12px;">
+                <h3>➕ הוסף אצווה</h3>
+                <label for="batch-qty">כמות:</label>
+                <input type="number" id="batch-qty" class="input-field" min="0" step="0.5" placeholder="כמות שהתקבלה">
+                <label for="batch-expiry">תאריך תפוגה:</label>
+                <input type="date" id="batch-expiry" class="input-field">
+                <button id="add-batch-btn" class="btn btn-primary">➕ הוסף אצווה</button>
+            </div>
+
+            <div class="modal-actions">
+                <button id="close-batch-btn" class="btn btn-secondary">סגור</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Receive Order Modal -->
     <div id="receive-modal" class="modal">
         <div class="modal-content">
