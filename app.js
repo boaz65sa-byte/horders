@@ -2801,6 +2801,7 @@ class OrderSystem {
         this.pendingImageProductId = '__new_product__';
         this.pendingImageMode = 'newProduct';
         input.value = '';
+        this.warmOcrWorker();
         input.click();
     }
 
@@ -2848,13 +2849,42 @@ class OrderSystem {
 
     async handleNewProductFromImage(file) {
         try {
-            this.showAlert('🔍 מזהה מוצר מהתמונה...', 'info');
-            const dataUrl = await this.compressImage(file, 320, 0.8);
-            const detected = await this.detectProductFromImage(file);
-
-            if (!detected || !detected.name || detected.name === 'מוצר חדש') {
-                this.showAlert('לא הצלחתי לזהות את המוצר. צלם שוב את השם/התווית או הברקוד בצורה ברורה.', 'info');
+            if (typeof Tesseract === 'undefined') {
+                this.showAlert('ספריית זיהוי טקסט לא נטענה. בדוק חיבור לאינטרנט ורענן את הדף.', 'info');
                 return;
+            }
+
+            this.showAlert('🔍 מזהה מוצר מהתמונה (עד 30 שניות)...', 'info');
+            const scanInput = await this.prepareImageForOcr(file);
+            const dataUrl = await this.compressImage(file, 320, 0.8);
+            let detected = await this.detectProductFromImage(scanInput);
+
+            if (!detected || !detected.name) {
+                const ocrText = await this.extractTextFromImage(scanInput);
+                const guess = this.buildDetectionFromRawOcr(ocrText);
+                if (guess && guess.name) {
+                    const confirmed = prompt(
+                        `זיהיתי מהתמונה:\n"${guess.name}"\n\nתקן את השם אם צריך ולחץ אישור:`,
+                        guess.name
+                    );
+                    if (!confirmed || !confirmed.trim()) return;
+                    detected = {
+                        ...guess,
+                        name: confirmed.trim(),
+                        confidence: Math.max(0.35, guess.confidence || 0.35),
+                        source: 'ocr-manual'
+                    };
+                } else {
+                    this.showAlert('לא הצלחתי לזהות את המוצר. צלם שוב את השם/התווית בקרוב, בתאורה טובה.', 'info');
+                    return;
+                }
+            } else if ((detected.confidence || 0) < 0.7) {
+                const confirmed = prompt(
+                    `זיהיתי:\n"${detected.name}"\n\nלאשר או לתקן את השם:`,
+                    detected.name
+                );
+                if (!confirmed || !confirmed.trim()) return;
+                detected.name = confirmed.trim();
             }
 
             const supplierSelect = document.getElementById('product-supplier-select');
@@ -2873,7 +2903,8 @@ class OrderSystem {
                 if (priceInput) priceInput.value = '';
                 this.pendingNewProductImage = '';
             }
-        } catch (_) {
+        } catch (err) {
+            console.error('Product scan failed:', err);
             this.showAlert('שגיאה בזיהוי המוצר. נסה שוב או הוסף ידנית.', 'info');
         }
     }
@@ -2994,7 +3025,7 @@ class OrderSystem {
             }
         }
 
-        if (!best || bestScore < 20) return null;
+        if (!best || bestScore < 14) return null;
         return {
             name: best,
             unit: 'יחידה',
@@ -3069,33 +3100,131 @@ class OrderSystem {
         return bestScore >= 8 ? best : null;
     }
 
-    async extractTextFromImage(file) {
-        if (typeof Tesseract === 'undefined') return '';
+    buildDetectionFromRawOcr(text) {
+        if (!text || !String(text).trim()) return null;
+        const fromTitle = this.extractProductTitleFromOcr(text);
+        if (fromTitle) return fromTitle;
+        return this.pickBestHebrewLine(text);
+    }
+
+    pickBestHebrewLine(text) {
+        const lines = String(text)
+            .split(/\n+/)
+            .map((line) => this.normalizeScanText(line.replace(/[^\u0590-\u05FFA-Za-z0-9%'"״׳\-\.\s]/g, ' ')))
+            .filter((line) => line.length >= 3 && line.length <= 60);
+
+        let best = null;
+        let bestScore = 0;
+
+        for (const line of lines) {
+            const hebrewCount = (line.match(/[\u0590-\u05FF]/g) || []).length;
+            if (hebrewCount < 2) continue;
+
+            let score = hebrewCount * 2 + Math.min(line.length, 28);
+            const words = line.split(' ').filter(Boolean);
+            if (words.length >= 2 && words.length <= 6) score += 10;
+            if (/professional|unilever|קנור|knorr|net wt|גרם|מ"ל|ml|ישראל/i.test(line)) score -= 10;
+            if (/דגש|תבלין|רוטב|אבקת|תערובת|מרק/i.test(line)) score += 15;
+
+            if (score > bestScore) {
+                bestScore = score;
+                best = line;
+            }
+        }
+
+        if (!best || bestScore < 8) return null;
+        return {
+            name: best,
+            unit: 'יחידה',
+            price: 0,
+            confidence: Math.min(0.6, 0.3 + bestScore / 80),
+            source: 'ocr-line',
+            score: bestScore
+        };
+    }
+
+    warmOcrWorker() {
+        if (typeof Tesseract === 'undefined') return;
+        if (!this._ocrWorkerPromise) {
+            this._ocrWorkerPromise = Tesseract.createWorker('heb+eng', 1, { logger: () => {} })
+                .catch(() => null);
+        }
+    }
+
+    async getOcrWorker() {
+        if (typeof Tesseract === 'undefined') return null;
+        this.warmOcrWorker();
+        return this._ocrWorkerPromise || null;
+    }
+
+    async extractTextFromImage(input) {
         try {
-            const result = await Tesseract.recognize(file, 'heb+eng', {
-                logger: () => {},
-                tessedit_pageseg_mode: '6'
-            });
+            const worker = await this.getOcrWorker();
+            if (!worker) {
+                const result = await Tesseract.recognize(input, 'heb+eng', { logger: () => {} });
+                return (result && result.data && result.data.text) ? result.data.text : '';
+            }
+            const result = await worker.recognize(input);
             return (result && result.data && result.data.text) ? result.data.text : '';
-        } catch (_) {
+        } catch (err) {
+            console.warn('OCR failed:', err);
             return '';
         }
     }
 
-    async detectProductFromImage(file) {
+    prepareImageForOcr(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const minSide = 1000;
+                    let { width, height } = img;
+                    const scale = Math.max(minSide / width, minSide / height, 1);
+                    width = Math.round(width * scale);
+                    height = Math.round(height * scale);
+
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.filter = 'contrast(1.25) brightness(1.05)';
+                    ctx.drawImage(img, 0, 0, width, height);
+                    ctx.filter = 'none';
+
+                    const imageData = ctx.getImageData(0, 0, width, height);
+                    const pixels = imageData.data;
+                    for (let i = 0; i < pixels.length; i += 4) {
+                        const gray = 0.299 * pixels[i] + 0.587 * pixels[i + 1] + 0.114 * pixels[i + 2];
+                        const boosted = Math.min(255, Math.max(0, (gray - 128) * 1.35 + 128));
+                        pixels[i] = pixels[i + 1] = pixels[i + 2] = boosted;
+                    }
+                    ctx.putImageData(imageData, 0, 0);
+
+                    canvas.toBlob((blob) => {
+                        if (blob) resolve(blob);
+                        else resolve(canvas);
+                    }, 'image/jpeg', 0.92);
+                };
+                img.onerror = reject;
+                img.src = e.target.result;
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    }
+
+    async detectProductFromImage(input) {
+        const scanSource = input || null;
         const [ocrText, barcode] = await Promise.all([
-            this.extractTextFromImage(file),
-            this.detectBarcodeFromFile(file)
+            scanSource ? this.extractTextFromImage(scanSource) : Promise.resolve(''),
+            scanSource instanceof Blob
+                ? this.detectBarcodeFromBlob(scanSource)
+                : (scanSource ? this.detectBarcodeFromFile(scanSource) : Promise.resolve(''))
         ]);
 
         const fromOcr = this.matchProductFromText(ocrText);
         if (fromOcr) return fromOcr;
-
-        const rawName = (file.name || '').replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ').trim();
-        const fromFileName = this.matchProductFromText(rawName);
-        if (fromFileName) {
-            return { ...fromFileName, confidence: Math.max(0.35, (fromFileName.confidence || 0) - 0.2) };
-        }
 
         if (barcode) {
             const fromBarcode = this.products.find((p) => p.barcode && p.barcode === barcode);
@@ -3111,7 +3240,22 @@ class OrderSystem {
             }
         }
 
+        const rawGuess = this.buildDetectionFromRawOcr(ocrText);
+        if (rawGuess) return rawGuess;
+
         return null;
+    }
+
+    async detectBarcodeFromBlob(blob) {
+        if (!('BarcodeDetector' in window)) return '';
+        try {
+            const detector = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'] });
+            const bitmap = await createImageBitmap(blob);
+            const codes = await detector.detect(bitmap);
+            return (codes[0] && codes[0].rawValue) ? codes[0].rawValue : '';
+        } catch (_) {
+            return '';
+        }
     }
 
     async detectBarcodeFromFile(file) {
