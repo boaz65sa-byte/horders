@@ -1408,3 +1408,26 @@ label {
 .lowstock-row { cursor: pointer; }
 .lowstock-row:active { background: #fff8f0; }
 .lowstock-sup { color: #E65100; font-size: 12px; }
+
+/* Inventory expiry / FIFO */
+.inventory-row .inv-name {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+}
+.inv-name-top { font-weight: 600; }
+.inv-expiry {
+    font-size: 12px;
+    padding: 3px 6px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    width: auto;
+    max-width: 140px;
+    margin: 0;
+    font-family: inherit;
+}
+.inv-expiry.exp-expired { border-color: #f44336; background: #ffebee; color: #b71c1c; }
+.inv-expiry.exp-soon { border-color: #FF9800; background: #fff3e0; }
+.exp-expired { color: #c62828; font-weight: 700; }
+.exp-soon { color: #E65100; font-weight: 600; }

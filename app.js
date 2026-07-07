@@ -978,6 +978,24 @@ class OrderSystem {
                     <span>קיים ${Number(p.stockQty) || 0} / יעד ${Number(p.parLevel) || 0} · חסר ${this.productShortage(p)}</span>
                 </div>`).join('');
 
+        // Expiry / FIFO: products with an expiry date, earliest first (use-first order)
+        const withExpiry = this.products
+            .filter(p => p.expiryDate)
+            .map(p => ({ p, days: this.expiryDays(p.expiryDate) }))
+            .filter(x => x.days !== null)
+            .sort((a, b) => a.days - b.days);
+        const expirySoon = withExpiry.filter(x => x.days <= 7);
+        const expiryHtml = expirySoon.length === 0
+            ? '<p class="dash-empty">אין מוצרים בסמוך לתפוגה 👍</p>'
+            : expirySoon.slice(0, 15).map(({ p, days }) => {
+                const cls = days < 0 ? 'exp-expired' : 'exp-soon';
+                const label = days < 0 ? `פג לפני ${-days} ימים` : (days === 0 ? 'פג היום' : `בעוד ${days} ימים`);
+                return `<div class="dash-recent lowstock-row" onclick="orderSystem.goToOrderForProduct('${p.id}')">
+                    <span>${days < 0 ? '⛔' : '⏳'} ${p.name} <span class="lowstock-sup">(${supName[p.supplierId] || ''})</span></span>
+                    <span class="${cls}">${new Date(p.expiryDate).toLocaleDateString('he-IL')} · ${label}</span>
+                </div>`;
+            }).join('');
+
         el.innerHTML = `
             <h2>🏠 שלום${userName ? ' ' + userName : ''}!</h2>
             <p class="help-text">יום ${dayName} · ${new Date().toLocaleDateString('he-IL')}</p>
@@ -1008,6 +1026,11 @@ class OrderSystem {
             <div class="dash-block">
                 <h3>⚠️ מלאי מתחת ליעד</h3>
                 ${lowStockHtml}
+            </div>
+
+            <div class="dash-block">
+                <h3>⏳ תוקף / FIFO — להשתמש קודם</h3>
+                ${expiryHtml}
             </div>
 
             <div class="dash-block">
@@ -1441,7 +1464,10 @@ class OrderSystem {
             const parAttrs = isAdmin ? '' : 'disabled';
             html += `
                 <div class="inventory-row" data-name="${product.name.toLowerCase()}">
-                    <span class="inv-name">${product.name} <button class="inv-flag-btn" onclick="orderSystem.markShortage('${product.id}')" type="button" title="סמן חסר">🚩</button></span>
+                    <span class="inv-name">
+                        <span class="inv-name-top">${product.name} <button class="inv-flag-btn" onclick="orderSystem.markShortage('${product.id}')" type="button" title="סמן חסר">🚩</button></span>
+                        <input type="date" class="inv-expiry ${this.expiryClass(product.expiryDate)}" data-product-id="${product.id}" value="${product.expiryDate || ''}" onchange="orderSystem.setInventoryExpiry('${product.id}', this.value)" title="תאריך תפוגה (FIFO)">
+                    </span>
                     <span class="inv-col">
                         <input type="number" class="input-field inv-input inv-stock" data-product-id="${product.id}" min="0" step="0.5" value="${stock}" inputmode="decimal"
                                onchange="orderSystem.updateInventoryRow('${product.id}')" oninput="orderSystem.updateInventoryRow('${product.id}')">
@@ -1520,7 +1546,68 @@ class OrderSystem {
         }
 
         this.saveData('products', this.products);
-        this.showAlert('✅ המלאי נשמר', 'success');
+
+        // Auto-report shortages to the chef: any product below par is added/updated in the needs list
+        const supplierId = document.getElementById('inventory-supplier-select').value;
+        const supplier = this.suppliers.find(s => s.id === supplierId);
+        const reportedBy = (typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.name) ? authSystem.currentUser.name : '';
+        let reported = 0;
+        this.products
+            .filter(p => p.supplierId === supplierId && this.productShortage(p) > 0)
+            .forEach(p => {
+                const shortage = this.productShortage(p);
+                const existing = this.needs.find(n => n.productId === p.id);
+                if (existing) {
+                    existing.qty = shortage;
+                    existing.reportedBy = reportedBy;
+                    existing.date = new Date().toISOString();
+                } else {
+                    this.needs.push({
+                        id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
+                        productId: p.id, name: p.name, supplierId: p.supplierId,
+                        supplierName: supplier ? supplier.name : '', qty: shortage,
+                        reportedBy, date: new Date().toISOString(), auto: true
+                    });
+                }
+                reported++;
+            });
+
+        if (reported > 0) {
+            this.saveData('needs', this.needs);
+            this.updateNeedsBadge();
+            this.renderNeeds();
+            this.renderDashboard();
+        }
+
+        this.showAlert(reported > 0 ? `✅ המלאי נשמר · ${reported} חוסרים נשלחו לשף` : '✅ המלאי נשמר', 'success');
+    }
+
+    // Days until expiry (negative = already expired), or null if no date
+    expiryDays(dateStr) {
+        if (!dateStr) return null;
+        const d = new Date(dateStr);
+        if (isNaN(d)) return null;
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        d.setHours(0, 0, 0, 0);
+        return Math.round((d - today) / 86400000);
+    }
+
+    expiryClass(dateStr) {
+        const days = this.expiryDays(dateStr);
+        if (days === null) return '';
+        if (days < 0) return 'exp-expired';
+        if (days <= 7) return 'exp-soon';
+        return 'exp-ok';
+    }
+
+    setInventoryExpiry(productId, value) {
+        const product = this.products.find(p => p.id === productId);
+        if (!product) return;
+        product.expiryDate = value || '';
+        this.saveData('products', this.products);
+        const input = document.querySelector(`.inv-expiry[data-product-id="${productId}"]`);
+        if (input) { input.className = `inv-expiry ${this.expiryClass(value)}`; }
+        this.renderDashboard();
     }
 
     // Collect shortages for the selected supplier and pre-fill an order with those amounts.
