@@ -3565,22 +3565,29 @@ class OrderSystem {
                     width = Math.round(width * scale);
                     height = Math.round(height * scale);
 
-                    const canvas = document.createElement('canvas');
-                    canvas.width = width;
-                    canvas.height = height;
-                    const ctx = canvas.getContext('2d');
-                    ctx.filter = 'contrast(1.3) brightness(1.08)';
-                    ctx.drawImage(img, 0, 0, width, height);
-                    ctx.filter = 'none';
+                    // Color image for storage/preview (original colors)
+                    const colorCanvas = document.createElement('canvas');
+                    colorCanvas.width = width;
+                    colorCanvas.height = height;
+                    colorCanvas.getContext('2d').drawImage(img, 0, 0, width, height);
 
-                    const imageData = ctx.getImageData(0, 0, width, height);
+                    // Grayscale + contrast — OCR only, not saved to product
+                    const ocrCanvas = document.createElement('canvas');
+                    ocrCanvas.width = width;
+                    ocrCanvas.height = height;
+                    const ocrCtx = ocrCanvas.getContext('2d');
+                    ocrCtx.filter = 'contrast(1.3) brightness(1.08)';
+                    ocrCtx.drawImage(img, 0, 0, width, height);
+                    ocrCtx.filter = 'none';
+
+                    const imageData = ocrCtx.getImageData(0, 0, width, height);
                     const pixels = imageData.data;
                     for (let i = 0; i < pixels.length; i += 4) {
                         const gray = 0.299 * pixels[i] + 0.587 * pixels[i + 1] + 0.114 * pixels[i + 2];
                         const boosted = Math.min(255, Math.max(0, (gray - 128) * 1.4 + 128));
                         pixels[i] = pixels[i + 1] = pixels[i + 2] = boosted;
                     }
-                    ctx.putImageData(imageData, 0, 0);
+                    ocrCtx.putImageData(imageData, 0, 0);
 
                     const storageMax = 360;
                     let sw = width;
@@ -3595,10 +3602,10 @@ class OrderSystem {
                     const storageCanvas = document.createElement('canvas');
                     storageCanvas.width = sw;
                     storageCanvas.height = sh;
-                    storageCanvas.getContext('2d').drawImage(canvas, 0, 0, sw, sh);
-                    const storageDataUrl = storageCanvas.toDataURL('image/jpeg', 0.82);
+                    storageCanvas.getContext('2d').drawImage(colorCanvas, 0, 0, sw, sh);
+                    const storageDataUrl = storageCanvas.toDataURL('image/jpeg', 0.85);
 
-                    canvas.toBlob((blob) => {
+                    ocrCanvas.toBlob((blob) => {
                         if (!blob) {
                             reject(new Error('Failed to process image'));
                             return;
