@@ -590,8 +590,8 @@ class OrderSystem {
         const needsHelp = document.getElementById('needs-help-text');
         if (needsHelp) {
             needsHelp.textContent = isChef
-                ? 'חוסרים שדווחו ע"י העובדים מופיעים כאן. לחץ "צור הזמנה" כדי למלא הזמנה לספק.'
-                : 'דווח חוסרים מטאב מלאי (🚩) או מכאן — החוסרים נשלחים לשף והוא מבצע את ההזמנה.';
+                ? 'חוסרים שדווחו ע"י העובדים מופיעים כאן. רק השף מאשר ויוצר הזמנה.'
+                : 'דווח חוסרים מטאב מלאי (🚩) — רק השף מאשר ומבצע הזמנה.';
         }
 
         this.updateSendButtonLabel();
@@ -917,6 +917,10 @@ class OrderSystem {
             this.showAlert('רק השף יכול לבצע הזמנות. דווח חוסרים בטאב מלאי או חוסרים.', 'info');
             tabName = 'needs';
         }
+        if (tabName === 'approvals' && !this.isChefUser()) {
+            this.showAlert('רק השף מאשר הזמנות וחוסרים.', 'info');
+            tabName = 'needs';
+        }
 
         // Update tab buttons
         document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
@@ -1031,8 +1035,8 @@ class OrderSystem {
             }).join('');
 
         const approvalsStat = isAdmin
-            ? `<div class="dash-stat" onclick="orderSystem.switchTab('approvals')"><div class="dash-stat-num">${this.pendingOrders.length}</div><div class="dash-stat-label">✅ אישורים ממתינים</div></div>`
-            : `<div class="dash-stat dash-stat-static"><div class="dash-stat-num">${this.pendingOrders.length}</div><div class="dash-stat-label">✅ ממתינים לאישור</div></div>`;
+            ? `<div class="dash-stat" onclick="orderSystem.switchTab('approvals')"><div class="dash-stat-num">${this.pendingOrders.length}</div><div class="dash-stat-label">✅ הזמנות לאישור</div></div>`
+            : `<div class="dash-stat dash-stat-static" onclick="orderSystem.switchTab('needs')"><div class="dash-stat-num">${userName ? this.needs.filter(n => n.reportedBy === userName).length : this.needs.length}</div><div class="dash-stat-label">🚩 חוסרים שדיווחתי</div></div>`;
 
         // Low stock: items with a par level set whose current stock is below it
         const supName = {};
@@ -1835,7 +1839,7 @@ class OrderSystem {
         });
         this.updateOrderSummary();
 
-        this.showAlert(`🛒 מולאו ${shortages.length} פריטים בחוסר. בדוק ושלח לאישור.`, 'success');
+        this.showAlert(`🛒 מולאו ${shortages.length} פריטים בחוסר. בדוק ושלח לספק.`, 'success');
     }
 
     // ===========================
@@ -1925,8 +1929,8 @@ class OrderSystem {
                     </div>
                     ${rows}
                     <div class="need-group-actions">
-                        ${isChef ? `<button class="btn btn-primary btn-small" onclick="orderSystem.createOrderFromNeeds('${supId}')">🛒 צור הזמנה</button>
-                        <button class="btn btn-secondary btn-small" onclick="orderSystem.clearSupplierNeeds('${supId}')">🗑️ נקה ספק</button>` : '<p class="help-text">ממתין להזמנה ע"י השף</p>'}
+                        ${isChef ? `<button class="btn btn-primary btn-small" onclick="orderSystem.createOrderFromNeeds('${supId}')">🛒 אשר וצור הזמנה</button>
+                        <button class="btn btn-secondary btn-small" onclick="orderSystem.clearSupplierNeeds('${supId}')">🗑️ נקה חוסרים</button>` : '<p class="help-text">ממתין לאישור השף</p>'}
                     </div>
                 </div>`;
         });
@@ -1934,6 +1938,10 @@ class OrderSystem {
     }
 
     removeNeed(needId) {
+        if (!this.isChefUser()) {
+            this.showAlert('רק השף יכול לאשר/לנקות חוסרים.', 'info');
+            return;
+        }
         this.needs = this.needs.filter(n => n.id !== needId);
         this.saveData('needs', this.needs);
         this.renderNeeds();
@@ -1941,6 +1949,10 @@ class OrderSystem {
     }
 
     clearSupplierNeeds(supplierId) {
+        if (!this.isChefUser()) {
+            this.showAlert('רק השף יכול לאשר/לנקות חוסרים.', 'info');
+            return;
+        }
         if (!confirm('לנקות את כל החוסרים של הספק?')) return;
         this.needs = this.needs.filter(n => n.supplierId !== supplierId);
         this.saveData('needs', this.needs);
@@ -1969,7 +1981,12 @@ class OrderSystem {
         });
         this.updateOrderSummary();
 
-        this.showAlert(`🛒 מולאו ${filled} פריטים מרשימת החוסרים. בדוק, השלם כמויות, ושלח לאישור.`, 'success');
+        this.needs = this.needs.filter(n => n.supplierId !== supplierId);
+        this.saveData('needs', this.needs);
+        this.updateNeedsBadge();
+        this.renderNeeds();
+
+        this.showAlert(`🛒 מולאו ${filled} פריטים מהחוסרים. בדוק ושלח לספק.`, 'success');
     }
 
     // ===========================
@@ -3481,6 +3498,10 @@ class OrderSystem {
 
     // Step 1: Employee submits the order for the chef's approval
     submitForApproval() {
+        if (!this.isChefUser()) {
+            this.showAlert('רק השף מאשר ושולח הזמנות. דווח חוסרים בטאב מלאי.', 'info');
+            return null;
+        }
         const supplierId = document.getElementById('supplier-select').value;
         const supplier = this.suppliers.find(s => s.id === supplierId);
         const orderItems = this.getOrderItems();
@@ -3553,6 +3574,10 @@ class OrderSystem {
 
     // Step 2: Chef approves -> send to supplier + orders manager
     async approveOrder(orderId) {
+        if (!this.isChefUser()) {
+            this.showAlert('רק השף יכול לאשר הזמנות.', 'info');
+            return;
+        }
         const order = this.pendingOrders.find(o => o.id === orderId);
         if (!order) return;
 
@@ -3615,6 +3640,10 @@ class OrderSystem {
     }
 
     rejectOrder(orderId) {
+        if (!this.isChefUser()) {
+            this.showAlert('רק השף יכול לדחות הזמנות.', 'info');
+            return;
+        }
         const order = this.pendingOrders.find(o => o.id === orderId);
         if (!order) return;
 
@@ -3873,6 +3902,10 @@ class OrderSystem {
     renderApprovals() {
         const container = document.getElementById('approvals-list');
         if (!container) return;
+        if (!this.isChefUser()) {
+            container.innerHTML = '<p class="alert alert-info">רק השף רואה ומאשר הזמנות.</p>';
+            return;
+        }
 
         if (this.pendingOrders.length === 0) {
             container.innerHTML = '<p class="alert alert-info">אין הזמנות הממתינות לאישור</p>';
@@ -3927,6 +3960,10 @@ class OrderSystem {
     updateApprovalsBadge() {
         const badge = document.getElementById('approvals-badge');
         if (!badge) return;
+        if (!this.isChefUser()) {
+            badge.style.display = 'none';
+            return;
+        }
         const count = this.pendingOrders.length;
         if (count > 0) {
             badge.textContent = count;
