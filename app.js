@@ -513,6 +513,7 @@ class OrderSystem {
         this.suppliers = this.loadData('suppliers') || this.getDefaultSuppliers();
         this.normalizeSuppliers();
         this.products = this.loadData('products') || this.getDefaultProducts();
+        this.normalizeProducts();
         this.history = this.loadData('history') || [];
         this.pendingOrders = this.loadData('pendingOrders') || [];
         this.staff = this.loadData('staff') || loadStaff();
@@ -554,6 +555,7 @@ class OrderSystem {
         }
         this.autoFillImages(true); // fill missing product images from the web (silent)
         this.renderAllProducts();
+        this.renderRecentlyAdded();
         // Persist default staff/users on first run so they sync to other devices
         if (!this.loadData('staff')) this.saveData('staff', this.staff);
         if (!this.loadData('users')) this.saveData('users', this.users);
@@ -931,7 +933,10 @@ class OrderSystem {
             this.renderApprovals();
             this.refreshPendingFromServer(); // pull latest pending orders from other devices
         }
-        if (tabName === 'products') this.renderAllProducts();
+        if (tabName === 'products') {
+            this.renderAllProducts();
+            this.renderRecentlyAdded();
+        }
         if (tabName === 'inventory') {
             this.loadSupplierSelects(); // keep the inventory supplier list in sync
             const invSel = document.getElementById('inventory-supplier-select');
@@ -1063,6 +1068,17 @@ class OrderSystem {
                 </div>`;
             }).join('');
 
+        const recentProducts = this.getRecentlyAddedProducts(8, 30);
+        const recentCount = this.countRecentlyAdded(7);
+        const recentProductsHtml = recentProducts.length === 0
+            ? '<p class="dash-empty">אין מוצרים חדשים ב-30 הימים האחרונים</p>'
+            : recentProducts.map((p) =>
+                `<div class="dash-recent lowstock-row" onclick="orderSystem.switchTab('products')">
+                    <span>🆕 ${p.name} <span class="lowstock-sup">(${supName[p.supplierId] || ''})</span></span>
+                    <span>${this.formatProductAddedDate(p.createdAt)} · ₪${Number(p.price).toFixed(2)}</span>
+                </div>`
+            ).join('');
+
         el.innerHTML = `
             <h2>🏠 שלום${userName ? ' ' + userName : ''}!</h2>
             <p class="help-text">יום ${dayName} · ${new Date().toLocaleDateString('he-IL')}</p>
@@ -1083,6 +1099,15 @@ class OrderSystem {
                     <div class="dash-stat-num">${lowStock.length}</div>
                     <div class="dash-stat-label">⚠️ מלאי נמוך</div>
                 </div>
+                <div class="dash-stat${recentCount ? '' : ' dash-stat-static'}" onclick="orderSystem.switchTab('products')" style="${recentCount ? 'background:linear-gradient(135deg,#7E57C2,#5E35B1)' : ''}">
+                    <div class="dash-stat-num">${recentCount}</div>
+                    <div class="dash-stat-label">🆕 חדשים השבוע</div>
+                </div>
+            </div>
+
+            <div class="dash-block">
+                <h3>🆕 נוספו לאחרונה</h3>
+                ${recentProductsHtml}
             </div>
 
             <div class="dash-block">
@@ -1321,6 +1346,78 @@ class OrderSystem {
     // Product Management
     // ===========================
 
+    productCreatedAt() {
+        return new Date().toISOString();
+    }
+
+    normalizeProducts() {
+        let changed = false;
+        this.products.forEach((p) => {
+            if (!p.createdAt) {
+                const idNum = parseInt(String(p.id), 10);
+                p.createdAt = (Number.isFinite(idNum) && idNum > 1e11)
+                    ? new Date(idNum).toISOString()
+                    : '1970-01-01T00:00:00.000Z';
+                changed = true;
+            }
+        });
+        if (changed) this.saveData('products', this.products);
+    }
+
+    getRecentlyAddedProducts(limit = 20, days = 30) {
+        const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+        return this.products
+            .filter((p) => new Date(p.createdAt || 0).getTime() >= cutoff)
+            .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+            .slice(0, limit);
+    }
+
+    countRecentlyAdded(days = 7) {
+        const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+        return this.products.filter((p) => new Date(p.createdAt || 0).getTime() >= cutoff).length;
+    }
+
+    formatProductAddedDate(iso) {
+        if (!iso) return '';
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return '';
+        const now = new Date();
+        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const startOfDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+        const diffDays = Math.round((startOfToday - startOfDate) / 86400000);
+        const time = d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+        if (diffDays === 0) return `היום ${time}`;
+        if (diffDays === 1) return 'אתמול';
+        if (diffDays < 7) return `לפני ${diffDays} ימים`;
+        return d.toLocaleDateString('he-IL');
+    }
+
+    renderRecentlyAdded() {
+        const container = document.getElementById('recent-products-list');
+        if (!container) return;
+
+        const recent = this.getRecentlyAddedProducts(20, 30);
+        const supName = {};
+        this.suppliers.forEach((s) => { supName[s.id] = s.name; });
+
+        if (!recent.length) {
+            container.innerHTML = '<p class="alert alert-info">אין מוצרים חדשים ב-30 הימים האחרונים</p>';
+            return;
+        }
+
+        container.innerHTML = recent.map((p) => `
+            <div class="recent-product-row">
+                <span class="managed-product-thumb ${p.image ? 'has-img' : ''}" ${p.image ? `style="background-image:url('${p.image}')"` : ''}>${p.image ? '' : '📦'}</span>
+                <span class="recent-product-info" onclick="orderSystem.goToOrderForProduct('${p.id}')">
+                    <span class="recent-product-name">${p.name}</span>
+                    <span class="recent-product-meta">${supName[p.supplierId] || 'ללא ספק'} · ${this.formatProductAddedDate(p.createdAt)}</span>
+                </span>
+                <span class="recent-product-price">₪${Number(p.price).toFixed(2)} / ${p.unit}</span>
+                <button class="btn btn-primary btn-small" onclick="orderSystem.editProduct('${p.id}')">✏️</button>
+            </div>
+        `).join('');
+    }
+
     addProduct() {
         const supplierId = document.getElementById('product-supplier-select').value;
         const name = document.getElementById('product-name').value.trim();
@@ -1338,7 +1435,8 @@ class OrderSystem {
             name,
             price,
             unit,
-            image: this.pendingNewProductImage || ''
+            image: this.pendingNewProductImage || '',
+            createdAt: this.productCreatedAt()
         };
 
         this.products.push(newProduct);
@@ -1353,6 +1451,7 @@ class OrderSystem {
 
         // Refresh the management list
         this.renderAllProducts();
+        this.renderRecentlyAdded();
 
         // Refresh products list if current supplier is selected
         const currentSupplierId = document.getElementById('supplier-select').value;
@@ -1425,6 +1524,7 @@ class OrderSystem {
         this.products = this.products.filter(p => p.id !== productId);
         this.saveData('products', this.products);
         this.renderAllProducts();
+        this.renderRecentlyAdded();
 
         // Refresh order list if the deleted product's supplier is selected
         const currentSupplierId = document.getElementById('supplier-select').value;
@@ -2017,7 +2117,8 @@ class OrderSystem {
                     name: e.he,
                     price: e.price,
                     unit: e.unit,
-                    image: catalogImage(e)
+                    image: catalogImage(e),
+                    createdAt: this.productCreatedAt()
                 });
                 existing.add(key);
                 added++;
@@ -2027,6 +2128,7 @@ class OrderSystem {
         if (added > 0) {
             this.saveData('products', this.products);
             this.renderAllProducts();
+            this.renderRecentlyAdded();
             const sid = document.getElementById('supplier-select').value;
             if (sid) this.loadProducts(sid);
         }
@@ -2328,7 +2430,8 @@ class OrderSystem {
                 supplierId,
                 name: p.name,
                 price: p.price,
-                unit: p.unit
+                unit: p.unit,
+                createdAt: this.productCreatedAt()
             };
             this.products.push(newProduct);
         });
@@ -2340,6 +2443,7 @@ class OrderSystem {
         
         // Refresh products list
         this.renderAllProducts();
+        this.renderRecentlyAdded();
 
         this.showAlert(`✅ יובאו ${count} מוצרים בהצלחה!`, 'success');
     }
@@ -3012,7 +3116,8 @@ class OrderSystem {
                 name,
                 price: Number.isFinite(detected.price) ? detected.price : 0,
                 unit: detected.unit || 'יחידה',
-                image: imageDataUrl || ''
+                image: imageDataUrl || '',
+                createdAt: this.productCreatedAt()
             };
             this.products.push(newProduct);
             try {
@@ -3039,6 +3144,7 @@ class OrderSystem {
         }
 
         this.renderAllProducts();
+        this.renderRecentlyAdded();
         const currentSupplierId = document.getElementById('supplier-select')?.value;
         if (currentSupplierId === supplierId) this.loadProducts(supplierId);
         return true;
