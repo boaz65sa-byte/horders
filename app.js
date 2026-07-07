@@ -891,6 +891,16 @@ class OrderSystem {
         const exportInventoryBtn = document.getElementById('export-inventory-btn');
         if (exportInventoryBtn) exportInventoryBtn.addEventListener('click', () => this.exportInventoryExcel());
 
+        // Stock-intake scanning (barcode / AI photo → identify existing product → add batch)
+        const scanStockBtn = document.getElementById('scan-stock-btn');
+        if (scanStockBtn) scanStockBtn.addEventListener('click', () => this.scanProduct());
+        const scanCameraInput = document.getElementById('scan-camera-input');
+        if (scanCameraInput) scanCameraInput.addEventListener('change', (e) => this.handleScanImage(e));
+        const scanSearch = document.getElementById('scan-search');
+        if (scanSearch) scanSearch.addEventListener('input', (e) => this.renderScanCandidates(e.target.value));
+        const closeScanBtn = document.getElementById('close-scan-btn');
+        if (closeScanBtn) closeScanBtn.addEventListener('click', () => this.closeScanModal());
+
         // Batch (FIFO) modal
         const addBatchBtn = document.getElementById('add-batch-btn');
         if (addBatchBtn) addBatchBtn.addEventListener('click', () => this.addBatch());
@@ -1887,6 +1897,146 @@ class OrderSystem {
 
     closeBatchManager() {
         document.getElementById('batch-modal').classList.remove('active');
+    }
+
+    // ===========================
+    // Product scanning (barcode via BarcodeDetector + AI photo identification)
+    // ===========================
+
+    scanProduct() {
+        this._pendingScanBarcode = null;
+        const input = document.getElementById('scan-camera-input');
+        if (input) { input.value = ''; input.click(); }
+    }
+
+    async handleScanImage(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        this.showAlert('📷 מעבד תמונה...', 'info');
+
+        // 1) Try a native barcode scan first (free, exact) — supported on Android/Chrome
+        try {
+            if ('BarcodeDetector' in window) {
+                const bitmap = await createImageBitmap(file);
+                const detector = new BarcodeDetector({
+                    formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code']
+                });
+                const codes = await detector.detect(bitmap);
+                if (codes && codes.length > 0) {
+                    this.handleScannedBarcode(codes[0].rawValue, file);
+                    return;
+                }
+            }
+        } catch (e) { /* fall through to AI */ }
+
+        // 2) No barcode → AI photo identification
+        this.identifyByPhoto(file);
+    }
+
+    handleScannedBarcode(code, file) {
+        const product = this.products.find(p => p.barcode === code);
+        if (product) {
+            this.showAlert(`✅ זוהה בברקוד: ${product.name}`, 'success');
+            this.openBatchManager(product.id); // add the received quantity + expiry as a batch
+            return;
+        }
+        // Unknown barcode → let the user link it to a product (saved for next time),
+        // and use the AI guess to pre-fill the search
+        this._pendingScanBarcode = code;
+        this.identifyByPhoto(file, `ברקוד ${code} לא מוכר — בחר מוצר לקישור`);
+    }
+
+    async identifyByPhoto(file, infoPrefix) {
+        let guess = '';
+        try {
+            const dataUrl = await this.compressImage(file, 800, 0.8);
+            const r = await fetch('/api/identify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: dataUrl })
+            });
+            const j = await r.json();
+            if (r.ok && j.name) {
+                guess = j.name;
+            } else if (r.status === 503) {
+                this.showAlert('זיהוי AI לא מוגדר עדיין (חסר מפתח API) — חפש ידנית', 'info');
+            }
+        } catch (e) { /* offline / server error — manual search still works */ }
+
+        this.openScanModal(guess, infoPrefix);
+    }
+
+    openScanModal(query, infoPrefix) {
+        const info = document.getElementById('scan-result-info');
+        if (info) {
+            info.textContent = infoPrefix
+                ? infoPrefix
+                : (query ? `🤖 זוהה: "${query}" — אשר או תקן` : 'חפש את המוצר ידנית');
+        }
+        const search = document.getElementById('scan-search');
+        if (search) search.value = query || '';
+        this.renderScanCandidates(query || '');
+        document.getElementById('scan-modal').classList.add('active');
+    }
+
+    renderScanCandidates(query) {
+        const el = document.getElementById('scan-candidates');
+        if (!el) return;
+        const q = (query || '').trim().toLowerCase();
+        const supName = {};
+        this.suppliers.forEach(s => { supName[s.id] = s.name; });
+
+        let results;
+        if (!q) {
+            results = [];
+        } else {
+            const words = q.split(/\s+/).filter(Boolean);
+            results = this.products
+                .map(p => {
+                    const name = p.name.toLowerCase();
+                    let score = 0;
+                    if (name.includes(q)) score += 10;
+                    words.forEach(w => { if (name.includes(w)) score += 2; });
+                    return { p, score };
+                })
+                .filter(x => x.score > 0)
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 12)
+                .map(x => x.p);
+        }
+
+        if (!results.length) {
+            el.innerHTML = q ? '<p class="dash-empty">לא נמצאו מוצרים תואמים — נסה מילה אחרת</p>' : '<p class="dash-empty">הקלד שם מוצר לחיפוש</p>';
+            return;
+        }
+        el.innerHTML = results.map(p =>
+            `<div class="gsearch-row" onclick="orderSystem.applyScanResult('${p.id}')">
+                <span class="gsearch-name">${p.name}</span>
+                <span class="gsearch-sup">${supName[p.supplierId] || ''}</span>
+            </div>`
+        ).join('');
+    }
+
+    applyScanResult(productId) {
+        const product = this.products.find(p => p.id === productId);
+        if (!product) return;
+
+        // If we got here from an unknown barcode, remember it on the product for next scans
+        if (this._pendingScanBarcode) {
+            product.barcode = this._pendingScanBarcode;
+            this._pendingScanBarcode = null;
+            this.saveData('products', this.products);
+            this.showAlert(`🔗 הברקוד קושר ל"${product.name}" — בסריקה הבאה יזוהה אוטומטית`, 'success');
+        }
+
+        this.closeScanModal();
+        this.openBatchManager(product.id); // enter received qty + expiry → added to stock (FIFO)
+    }
+
+    closeScanModal() {
+        this._pendingScanBarcode = null;
+        document.getElementById('scan-modal').classList.remove('active');
     }
 
     // Collect shortages for the selected supplier and pre-fill an order with those amounts.

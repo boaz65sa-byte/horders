@@ -178,6 +178,8 @@
                 <h2>📦 ניהול מלאי</h2>
                 <p class="help-text">עדכן "כמות קיים" במלאי → "כמות להזמנה" (החוסר) מחושבת אוטומטית. "מלאי פתיחה" (כמה צריך להיות) נערך ע"י השף/מנהל בלבד.</p>
 
+                <button id="scan-stock-btn" class="btn btn-primary" style="background:linear-gradient(135deg,#5C6BC0,#3949AB);">📷 סרוק מוצר לקליטת מלאי (ברקוד / זיהוי בתמונה)</button>
+
                 <label for="inventory-supplier-select">בחר ספק:</label>
                 <select id="inventory-supplier-select" class="input-field">
                     <option value="">-- בחר ספק --</option>
@@ -543,7 +545,7 @@
         </div>
     </div>
 
-    <!-- Scan Product Confirm Modal -->
+    <!-- Scan Product Confirm Modal (add NEW product to the bank from a photo — OCR) -->
     <div id="scan-product-modal" class="modal">
         <div class="modal-content scan-modal-content">
             <h2>📷 אישור מוצר מצילום</h2>
@@ -569,6 +571,25 @@
             </div>
         </div>
     </div>
+
+    <!-- Scan Stock-Intake Modal (identify EXISTING product — barcode / AI) -->
+    <div id="scan-modal" class="modal">
+        <div class="modal-content">
+            <h2>📷 סריקת מוצר לקליטת מלאי</h2>
+            <p class="help-text" id="scan-result-info"></p>
+
+            <label for="scan-search">חפש / אשר מוצר:</label>
+            <input type="text" id="scan-search" class="input-field" placeholder="שם מוצר..." autocomplete="off">
+            <div id="scan-candidates"></div>
+
+            <div class="modal-actions">
+                <button id="close-scan-btn" class="btn btn-secondary">❌ סגור</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden camera input for stock-intake scanning -->
+    <input type="file" id="scan-camera-input" accept="image/*" capture="environment" style="display: none;">
 
     <!-- Shared hidden input for product image upload (camera/gallery on mobile) -->
     <input type="file" id="product-image-input" accept="image/*" capture="environment" style="display: none;">
