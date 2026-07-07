@@ -534,6 +534,8 @@ class OrderSystem {
         this.manualItems = [];
         this.excelPreviewData = null;
         this.pendingImageProductId = null;
+        this.pendingImageMode = 'existing';
+        this.pendingNewProductImage = '';
         this.sharedBankActive = false; // becomes true once the KV-backed shared bank is reachable
         this._sharedSaveTimer = null;
         this._dirtyKeys = new Set(); // which collections changed since the last shared save
@@ -808,6 +810,8 @@ class OrderSystem {
         // Products tab
         const addProductBtn = document.getElementById('add-product-btn');
         if (addProductBtn) addProductBtn.addEventListener('click', () => this.addProduct());
+        const scanProductBtn = document.getElementById('scan-product-btn');
+        if (scanProductBtn) scanProductBtn.addEventListener('click', () => this.startScanNewProduct());
 
         const autofillImagesBtn = document.getElementById('autofill-images-btn');
         if (autofillImagesBtn) autofillImagesBtn.addEventListener('click', () => this.autoFillImages(false));
@@ -1285,7 +1289,8 @@ class OrderSystem {
             supplierId,
             name,
             price,
-            unit
+            unit,
+            image: this.pendingNewProductImage || ''
         };
 
         this.products.push(newProduct);
@@ -1294,6 +1299,7 @@ class OrderSystem {
         // Clear form
         document.getElementById('product-name').value = '';
         document.getElementById('product-price').value = '';
+        this.pendingNewProductImage = '';
 
         this.showAlert('המוצר נוסף בהצלחה! ✅', 'success');
 
@@ -2729,11 +2735,21 @@ class OrderSystem {
 
     openImagePicker(productId) {
         this.pendingImageProductId = productId;
+        this.pendingImageMode = 'existing';
         const input = document.getElementById('product-image-input');
         if (input) {
             input.value = '';
             input.click();
         }
+    }
+
+    startScanNewProduct() {
+        const input = document.getElementById('product-image-input');
+        if (!input) return;
+        this.pendingImageProductId = '__new_product__';
+        this.pendingImageMode = 'newProduct';
+        input.value = '';
+        input.click();
     }
 
     handleProductImage(event) {
@@ -2743,6 +2759,14 @@ class OrderSystem {
 
         if (!file.type.startsWith('image/')) {
             alert('נא לבחור קובץ תמונה');
+            return;
+        }
+
+        if (this.pendingImageMode === 'newProduct') {
+            this.handleNewProductFromImage(file).finally(() => {
+                this.pendingImageProductId = null;
+                this.pendingImageMode = 'existing';
+            });
             return;
         }
 
@@ -2764,7 +2788,82 @@ class OrderSystem {
                 this.renderAllProducts();
             })
             .catch(() => alert('שגיאה בעיבוד התמונה'))
-            .finally(() => { this.pendingImageProductId = null; });
+            .finally(() => {
+                this.pendingImageProductId = null;
+                this.pendingImageMode = 'existing';
+            });
+    }
+
+    async handleNewProductFromImage(file) {
+        try {
+            const [dataUrl, detected] = await Promise.all([
+                this.compressImage(file, 320, 0.8),
+                this.detectProductFromImage(file)
+            ]);
+            this.pendingNewProductImage = dataUrl;
+
+            const supplierSelect = document.getElementById('product-supplier-select');
+            const nameInput = document.getElementById('product-name');
+            const unitSelect = document.getElementById('product-unit');
+            const priceInput = document.getElementById('product-price');
+
+            if (supplierSelect && detected.supplierId) supplierSelect.value = detected.supplierId;
+            if (nameInput) nameInput.value = detected.name || 'מוצר חדש';
+            if (unitSelect && detected.unit) unitSelect.value = detected.unit;
+            if (priceInput && Number.isFinite(detected.price)) priceInput.value = detected.price;
+
+            const confidenceText = Math.round((detected.confidence || 0) * 100);
+            this.showAlert(`📷 זוהה: ${detected.name || 'מוצר חדש'} (${confidenceText}% ביטחון). בדוק ולחץ "הוסף מוצר".`, 'success');
+        } catch (_) {
+            this.showAlert('לא הצלחתי לזהות מוצר מהצילום. הוספתי את התמונה, מלא את השדות ידנית.', 'info');
+        }
+    }
+
+    async detectProductFromImage(file) {
+        const rawName = (file.name || '').replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ').trim();
+        const normalized = rawName.toLowerCase();
+        const barcode = await this.detectBarcodeFromFile(file);
+
+        let best = null;
+        if (normalized) {
+            const ranked = PRODUCT_CATALOG.slice().sort((a, b) => b.kw.length - a.kw.length);
+            best = ranked.find(e => normalized.includes(String(e.kw || '').toLowerCase()) || normalized.includes(String(e.he || '').toLowerCase())) || null;
+        }
+
+        if (!best && barcode) {
+            // Placeholder for future barcode catalog mapping
+            best = null;
+        }
+
+        if (best) {
+            return {
+                name: best.he,
+                supplierId: best.sup,
+                unit: best.unit || 'יחידה',
+                price: best.price,
+                confidence: normalized ? 0.78 : 0.65
+            };
+        }
+
+        return {
+            name: rawName || 'מוצר חדש',
+            supplierId: document.getElementById('product-supplier-select')?.value || '',
+            unit: 'יחידה',
+            price: '',
+            confidence: rawName ? 0.45 : 0.25
+        };
+    }
+
+    async detectBarcodeFromFile(file) {
+        if (!('BarcodeDetector' in window)) return '';
+        try {
+            const detector = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'] });
+            const bitmap = await createImageBitmap(file);
+            const codes = await detector.detect(bitmap);
+            return (codes[0] && codes[0].rawValue) ? codes[0].rawValue : '';
+        } catch (_) {
+            return '';
+        }
     }
 
     // Resize + compress an image file to a small JPEG data URL (fits localStorage)
