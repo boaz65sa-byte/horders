@@ -69,7 +69,7 @@ const PRODUCT_CATALOG = [
     { he: 'ענבים', kw: 'ענב', en: 'grapes', sup: '1', price: 14, unit: 'ק״ג' },
     { he: 'אבטיח', kw: 'אבטיח', en: 'watermelon', sup: '1', price: 4, unit: 'ק״ג' },
     { he: 'מלון', kw: 'מלון', en: 'cantaloupe melon', sup: '1', price: 6, unit: 'ק״ג' },
-    { he: 'תות שדה', kw: 'תות', md: 'Strawberries', sup: '1', price: 18, unit: 'ק״ג' },
+    { he: 'תות שדה', kw: 'תות שדה', md: 'Strawberries', sup: '1', price: 18, unit: 'ק״ג' },
     { he: 'אפרסקים', kw: 'אפרסק', en: 'peach', sup: '1', price: 12, unit: 'ק״ג' },
     { he: 'נקטרינות', kw: 'נקטר', en: 'nectarine', sup: '1', price: 12, unit: 'ק״ג' },
     { he: 'שזיפים', kw: 'שזיף', en: 'plum', sup: '1', price: 11, unit: 'ק״ג' },
@@ -2871,71 +2871,159 @@ class OrderSystem {
 
     matchProductFromText(text) {
         if (!text) return null;
-        const normalized = String(text).replace(/\s+/g, ' ').trim();
-        const lower = normalized.toLowerCase();
+        const normalized = this.normalizeScanText(text);
         if (!normalized) return null;
 
-        const bankMatches = this.products
-            .slice()
-            .sort((a, b) => b.name.length - a.name.length);
-        for (const product of bankMatches) {
+        const candidates = [];
+
+        const title = this.extractProductTitleFromOcr(text);
+        if (title) candidates.push(title);
+
+        const bankBest = this.findBestBankMatch(normalized);
+        if (bankBest) candidates.push(bankBest);
+
+        const catalogBest = this.findBestCatalogMatch(normalized);
+        if (catalogBest) candidates.push(catalogBest);
+
+        if (!candidates.length) return null;
+        candidates.sort((a, b) => (b.score || 0) - (a.score || 0));
+        const best = candidates[0];
+        return {
+            name: best.name,
+            supplierId: best.supplierId || document.getElementById('product-supplier-select')?.value || '',
+            unit: best.unit || 'יחידה',
+            price: best.price,
+            confidence: best.confidence,
+            source: best.source
+        };
+    }
+
+    normalizeScanText(text) {
+        return String(text)
+            .replace(/[|״""''`]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    containsScanTerm(text, term) {
+        if (!text || !term) return false;
+        const value = String(term).trim();
+        if (!value) return false;
+        if (value.length >= 5) return text.includes(value);
+        const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp(`(^|[\\s,.:;|\\-()\\[\\]/"'])${escaped}($|[\\s,.:;|\\-()\\[\\]/"'])`);
+        return re.test(` ${text} `);
+    }
+
+    extractProductTitleFromOcr(text) {
+        const lines = String(text)
+            .split(/\n+/)
+            .map((line) => this.normalizeScanText(line.replace(/[^\u0590-\u05FFA-Za-z0-9%'"״׳\-\.\s]/g, ' ')))
+            .filter((line) => line.length >= 4 && line.length <= 48);
+
+        const skipLine = /קנור|professional|unilever|משקל|נקי|ללא|גלוטן|פרווה|vegan|plant|solutions|ישראל/i;
+        let best = null;
+        let bestScore = 0;
+
+        for (const line of lines) {
+            const hebrewCount = (line.match(/[\u0590-\u05FF]/g) || []).length;
+            if (hebrewCount < 3) continue;
+            if (skipLine.test(line) && !/דגש|תבלין|מרק|בצל|עגבני|חלב|גבינ/i.test(line)) continue;
+
+            let score = hebrewCount;
+            const words = line.split(' ').filter(Boolean);
+            if (words.length >= 2 && words.length <= 5) score += 18;
+            if (/דגש|תבלין|רוטב|אבקת|תערובת/i.test(line)) score += 25;
+            if (/בצל|עגבני|חלב|גבינ|עוף|בשר|שמן|סוכר|קמח/i.test(line)) score += 12;
+
+            if (score > bestScore) {
+                bestScore = score;
+                best = line;
+            }
+        }
+
+        if (!best || bestScore < 20) return null;
+        return {
+            name: best,
+            unit: 'יחידה',
+            price: 0,
+            confidence: Math.min(0.95, 0.55 + bestScore / 100),
+            source: 'ocr-title',
+            score: bestScore + 40
+        };
+    }
+
+    findBestBankMatch(normalized) {
+        let best = null;
+        let bestScore = 0;
+
+        for (const product of this.products) {
             const productName = String(product.name || '').trim();
             if (!productName) continue;
-            if (normalized.includes(productName) || lower.includes(productName.toLowerCase())) {
-                return {
+
+            let score = 0;
+            if (normalized.includes(productName)) {
+                score = productName.length * 4;
+            } else if (productName.length >= 5 && this.containsScanTerm(normalized, productName)) {
+                score = productName.length * 3;
+            }
+
+            if (score > bestScore) {
+                bestScore = score;
+                best = {
                     name: productName,
                     supplierId: product.supplierId,
                     unit: product.unit || 'יחידה',
                     price: product.price,
                     confidence: 0.93,
-                    source: 'bank'
+                    source: 'bank',
+                    score
                 };
             }
         }
 
-        const catalogMatches = PRODUCT_CATALOG.slice().sort((a, b) => b.kw.length - a.kw.length);
-        for (const entry of catalogMatches) {
-            const he = String(entry.he || '');
-            const kw = String(entry.kw || '');
-            const en = String(entry.en || '').toLowerCase();
-            if (
-                (kw && normalized.includes(kw)) ||
-                (he && normalized.includes(he)) ||
-                (en && lower.includes(en))
-            ) {
-                return {
+        return bestScore >= 12 ? best : null;
+    }
+
+    findBestCatalogMatch(normalized) {
+        let best = null;
+        let bestScore = 0;
+        const lower = normalized.toLowerCase();
+
+        for (const entry of PRODUCT_CATALOG) {
+            const he = String(entry.he || '').trim();
+            const kw = String(entry.kw || '').trim();
+            const en = String(entry.en || '').trim().toLowerCase();
+            let score = 0;
+
+            if (he && normalized.includes(he)) score = Math.max(score, he.length * 3);
+            if (kw && this.containsScanTerm(normalized, kw)) score = Math.max(score, kw.length * 2);
+            if (en && lower.includes(en)) score = Math.max(score, en.length * 2);
+
+            if (score > bestScore) {
+                bestScore = score;
+                best = {
                     name: he,
                     supplierId: entry.sup,
                     unit: entry.unit || 'יחידה',
                     price: entry.price,
                     confidence: 0.86,
-                    source: 'catalog'
+                    source: 'catalog',
+                    score
                 };
             }
         }
 
-        const hebrewPhrase = normalized.match(/[\u0590-\u05FF][\u0590-\u05FF0-9%'"״׳\-\.\s]{1,40}/);
-        if (hebrewPhrase) {
-            const guessedName = hebrewPhrase[0].trim();
-            if (guessedName.length >= 2) {
-                return {
-                    name: guessedName,
-                    supplierId: document.getElementById('product-supplier-select')?.value || '',
-                    unit: 'יחידה',
-                    price: 0,
-                    confidence: 0.42,
-                    source: 'ocr'
-                };
-            }
-        }
-
-        return null;
+        return bestScore >= 8 ? best : null;
     }
 
     async extractTextFromImage(file) {
         if (typeof Tesseract === 'undefined') return '';
         try {
-            const result = await Tesseract.recognize(file, 'heb+eng', { logger: () => {} });
+            const result = await Tesseract.recognize(file, 'heb+eng', {
+                logger: () => {},
+                tessedit_pageseg_mode: '6'
+            });
             return (result && result.data && result.data.text) ? result.data.text : '';
         } catch (_) {
             return '';
