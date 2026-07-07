@@ -343,6 +343,8 @@ class AuthSystem {
                 // Settings + Approvals (chef) tabs are admin-only
                 if (settingsTab) settingsTab.classList.toggle('tab-hidden', !isAdmin);
                 if (approvalsTab) approvalsTab.classList.toggle('tab-hidden', !isAdmin);
+                const orderTab = document.getElementById('order-tab-btn');
+                if (orderTab) orderTab.classList.toggle('tab-hidden', !isAdmin);
 
                 // Refresh the pending-approvals badge once the order system exists
                 if (isAdmin && typeof orderSystem !== 'undefined' && orderSystem) {
@@ -351,6 +353,7 @@ class AuthSystem {
 
                 // Show order-day reminder + dashboard once logged in
                 if (typeof orderSystem !== 'undefined' && orderSystem) {
+                    orderSystem.applyRoleVisibility();
                     orderSystem.checkOrderReminders();
                     orderSystem.renderDashboard();
                     orderSystem.updateSendButtonLabel();
@@ -569,6 +572,29 @@ class OrderSystem {
         this.checkOrderReminders();
         this.setupPush();
         this.initSharedBank();
+        this.applyRoleVisibility();
+    }
+
+    isChefUser() {
+        return typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.role === 'admin';
+    }
+
+    applyRoleVisibility() {
+        const isChef = this.isChefUser();
+        const orderTab = document.getElementById('order-tab-btn');
+        if (orderTab) orderTab.classList.toggle('tab-hidden', !isChef);
+
+        const createFromShortageBtn = document.getElementById('create-order-from-shortage-btn');
+        if (createFromShortageBtn) createFromShortageBtn.style.display = isChef ? '' : 'none';
+
+        const needsHelp = document.getElementById('needs-help-text');
+        if (needsHelp) {
+            needsHelp.textContent = isChef
+                ? 'חוסרים שדווחו ע"י העובדים מופיעים כאן. לחץ "צור הזמנה" כדי למלא הזמנה לספק.'
+                : 'דווח חוסרים מטאב מלאי (🚩) או מכאן — החוסרים נשלחים לשף והוא מבצע את ההזמנה.';
+        }
+
+        this.updateSendButtonLabel();
     }
 
     // ===========================
@@ -887,6 +913,11 @@ class OrderSystem {
     // ===========================
 
     switchTab(tabName) {
+        if (tabName === 'order' && !this.isChefUser()) {
+            this.showAlert('רק השף יכול לבצע הזמנות. דווח חוסרים בטאב מלאי או חוסרים.', 'info');
+            tabName = 'needs';
+        }
+
         // Update tab buttons
         document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
         document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
@@ -915,9 +946,28 @@ class OrderSystem {
     // ===========================
 
     goToOrder(supplierId) {
+        if (!this.isChefUser()) {
+            this.goToInventory(supplierId);
+            return;
+        }
         this.switchTab('order');
         const sel = document.getElementById('supplier-select');
         if (sel) { sel.value = supplierId; this.onSupplierChange(supplierId); }
+    }
+
+    goToInventory(supplierId) {
+        this.switchTab('inventory');
+        const sel = document.getElementById('inventory-supplier-select');
+        if (sel) {
+            sel.value = supplierId;
+            this.renderInventory(supplierId);
+        }
+    }
+
+    goToProductInInventory(productId) {
+        const p = this.products.find(x => x.id === productId);
+        if (!p) return;
+        this.goToInventory(p.supplierId);
     }
 
     // Global product search (across all suppliers) from the dashboard
@@ -933,7 +983,7 @@ class OrderSystem {
 
         if (!results.length) { el.innerHTML = '<p class="dash-empty">לא נמצאו מוצרים</p>'; return; }
         el.innerHTML = results.map(p =>
-            `<div class="gsearch-row" onclick="orderSystem.goToOrderForProduct('${p.id}')">
+            `<div class="gsearch-row" onclick="orderSystem.${this.isChefUser() ? 'goToOrderForProduct' : 'goToProductInInventory'}('${p.id}')">
                 <span class="gsearch-name">${p.name}</span>
                 <span class="gsearch-sup">${supName[p.supplierId] || 'ללא ספק'}</span>
             </div>`
@@ -944,6 +994,10 @@ class OrderSystem {
     goToOrderForProduct(productId) {
         const p = this.products.find(x => x.id === productId);
         if (!p) return;
+        if (!this.isChefUser()) {
+            this.goToProductInInventory(productId);
+            return;
+        }
         this.goToOrder(p.supplierId);
         const ps = document.getElementById('product-search');
         if (ps) { ps.value = p.name; this.filterProducts(p.name); }
@@ -961,7 +1015,13 @@ class OrderSystem {
         const dueSuppliers = this.suppliers.filter(s => Array.isArray(s.orderDays) && s.orderDays.includes(today));
         const dueHtml = dueSuppliers.length === 0
             ? '<p class="dash-empty">אין ספקים מתוזמנים להיום</p>'
-            : dueSuppliers.map(s => `<button class="dash-supplier" onclick="orderSystem.goToOrder('${s.id}')">🛒 ${s.name}</button>`).join('');
+            : dueSuppliers.map(s => {
+                const action = isAdmin
+                    ? `orderSystem.goToOrder('${s.id}')`
+                    : `orderSystem.goToInventory('${s.id}')`;
+                const label = isAdmin ? '🛒' : '📦';
+                return `<button class="dash-supplier" onclick="${action}">${label} ${s.name}</button>`;
+            }).join('');
 
         const recentHtml = this.history.length === 0
             ? '<p class="dash-empty">אין הזמנות עדיין</p>'
@@ -983,7 +1043,7 @@ class OrderSystem {
         const lowStockHtml = lowStock.length === 0
             ? '<p class="dash-empty">אין מוצרים מתחת ליעד המלאי 👍</p>'
             : lowStock.slice(0, 15).map(p =>
-                `<div class="dash-recent lowstock-row" onclick="orderSystem.goToOrderForProduct('${p.id}')">
+                `<div class="dash-recent lowstock-row" onclick="orderSystem.${isAdmin ? 'goToOrderForProduct' : 'goToProductInInventory'}('${p.id}')">
                     <span>⚠️ ${p.name} <span class="lowstock-sup">(${supName[p.supplierId] || ''})</span></span>
                     <span>קיים ${Number(p.stockQty) || 0} / יעד ${Number(p.parLevel) || 0} · חסר ${this.productShortage(p)}</span>
                 </div>`).join('');
@@ -1009,7 +1069,7 @@ class OrderSystem {
             : expirySoon.slice(0, 15).map(({ p, expiryDate, qty, days }) => {
                 const cls = days < 0 ? 'exp-expired' : 'exp-soon';
                 const label = days < 0 ? `פג לפני ${-days} ימים` : (days === 0 ? 'פג היום' : `בעוד ${days} ימים`);
-                return `<div class="dash-recent lowstock-row" onclick="orderSystem.goToOrderForProduct('${p.id}')">
+                return `<div class="dash-recent lowstock-row" onclick="orderSystem.${isAdmin ? 'goToOrderForProduct' : 'goToProductInInventory'}('${p.id}')">
                     <span>${days < 0 ? '⛔' : '⏳'} ${p.name} <span class="lowstock-sup">(${supName[p.supplierId] || ''})</span></span>
                     <span class="${cls}">${new Date(expiryDate).toLocaleDateString('he-IL')} · כמות ${qty} · ${label}</span>
                 </div>`;
@@ -1743,6 +1803,10 @@ class OrderSystem {
 
     // Collect shortages for the selected supplier and pre-fill an order with those amounts.
     createOrderFromShortage() {
+        if (!this.isChefUser()) {
+            this.showAlert('רק השף יכול ליצור הזמנה. שמור מלאי כדי לשלוח חוסרים לשף.', 'info');
+            return;
+        }
         const supplierId = document.getElementById('inventory-supplier-select').value;
         if (!supplierId) { alert('נא לבחור ספק'); return; }
 
@@ -1811,7 +1875,7 @@ class OrderSystem {
 
         this.saveData('needs', this.needs);
         this.updateNeedsBadge();
-        this.showAlert(`🚩 "${product.name}" סומן כחסר`, 'success');
+        this.showAlert(`🚩 "${product.name}" נשלח לשף כחוסר`, 'success');
     }
 
     updateNeedsBadge() {
@@ -1839,6 +1903,7 @@ class OrderSystem {
         });
 
         let html = '';
+        const isChef = this.isChefUser();
         Object.keys(groups).forEach(supId => {
             const g = groups[supId];
             let rows = '';
@@ -1850,7 +1915,7 @@ class OrderSystem {
                         <span class="need-name">${n.name}</span>
                         <span class="need-qty">כמות: ${qtyStr}</span>
                         <span class="need-by">${by}</span>
-                        <button class="btn btn-secondary btn-small" onclick="orderSystem.removeNeed('${n.id}')">✖</button>
+                        ${isChef ? `<button class="btn btn-secondary btn-small" onclick="orderSystem.removeNeed('${n.id}')">✖</button>` : ''}
                     </div>`;
             });
             html += `
@@ -1860,8 +1925,8 @@ class OrderSystem {
                     </div>
                     ${rows}
                     <div class="need-group-actions">
-                        <button class="btn btn-primary btn-small" onclick="orderSystem.createOrderFromNeeds('${supId}')">🛒 צור הזמנה</button>
-                        <button class="btn btn-secondary btn-small" onclick="orderSystem.clearSupplierNeeds('${supId}')">🗑️ נקה ספק</button>
+                        ${isChef ? `<button class="btn btn-primary btn-small" onclick="orderSystem.createOrderFromNeeds('${supId}')">🛒 צור הזמנה</button>
+                        <button class="btn btn-secondary btn-small" onclick="orderSystem.clearSupplierNeeds('${supId}')">🗑️ נקה ספק</button>` : '<p class="help-text">ממתין להזמנה ע"י השף</p>'}
                     </div>
                 </div>`;
         });
@@ -1885,6 +1950,10 @@ class OrderSystem {
 
     // Merge a supplier's reported needs into an order (qty defaults to 1 when unspecified)
     createOrderFromNeeds(supplierId) {
+        if (!this.isChefUser()) {
+            this.showAlert('רק השף יכול ליצור הזמנה מהחוסרים.', 'info');
+            return;
+        }
         const items = this.needs.filter(n => n.supplierId === supplierId);
         if (items.length === 0) return;
 
@@ -2724,9 +2793,10 @@ class OrderSystem {
     updateSendButtonLabel() {
         const btn = document.getElementById('send-order-btn');
         if (!btn) return;
-        const isAdmin = typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.role === 'admin';
+        const isChef = this.isChefUser();
         const count = this.currentOrder.length + this.manualItems.length;
-        btn.textContent = count > 0 ? `📤 שלח לאישור השף (${count})` : '📤 שלח לאישור השף';
+        btn.style.display = isChef ? '' : 'none';
+        btn.textContent = count > 0 ? `📤 שלח הזמנה לספק (${count})` : '📤 שלח הזמנה לספק';
     }
 
     // ===========================
@@ -3353,10 +3423,13 @@ class OrderSystem {
         return payload ? payload.text : '';
     }
 
-    // Route to approval flow or direct send (chef/admin)
+    // Only the chef can place orders; employees report shortages only
     submitOrder() {
-        // Everyone (including the chef) submits to the chef for approval
-        this.submitForApproval();
+        if (!this.isChefUser()) {
+            this.showAlert('רק השף יכול לבצע הזמנה. דווח חוסרים בטאב מלאי או חוסרים.', 'info');
+            return;
+        }
+        this.submitAndSendDirectly();
     }
 
     // Chef/admin: build order and send immediately without pending step
