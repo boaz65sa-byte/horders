@@ -2796,11 +2796,14 @@ class OrderSystem {
 
     async handleNewProductFromImage(file) {
         try {
-            const [dataUrl, detected] = await Promise.all([
-                this.compressImage(file, 320, 0.8),
-                this.detectProductFromImage(file)
-            ]);
-            this.pendingNewProductImage = dataUrl;
+            this.showAlert('🔍 מזהה מוצר מהתמונה...', 'info');
+            const dataUrl = await this.compressImage(file, 320, 0.8);
+            const detected = await this.detectProductFromImage(file);
+
+            if (!detected || !detected.name || detected.name === 'מוצר חדש') {
+                this.showAlert('לא הצלחתי לזהות את המוצר. צלם שוב את השם/התווית או הברקוד בצורה ברורה.', 'info');
+                return;
+            }
 
             const supplierSelect = document.getElementById('product-supplier-select');
             const nameInput = document.getElementById('product-name');
@@ -2808,50 +2811,167 @@ class OrderSystem {
             const priceInput = document.getElementById('product-price');
 
             if (supplierSelect && detected.supplierId) supplierSelect.value = detected.supplierId;
-            if (nameInput) nameInput.value = detected.name || 'מוצר חדש';
+            if (nameInput) nameInput.value = detected.name;
             if (unitSelect && detected.unit) unitSelect.value = detected.unit;
             if (priceInput && Number.isFinite(detected.price)) priceInput.value = detected.price;
 
-            const confidenceText = Math.round((detected.confidence || 0) * 100);
-            this.showAlert(`📷 זוהה: ${detected.name || 'מוצר חדש'} (${confidenceText}% ביטחון). בדוק ולחץ "הוסף מוצר".`, 'success');
+            const saved = this.saveScannedProduct(detected, dataUrl);
+            if (saved) {
+                if (nameInput) nameInput.value = '';
+                if (priceInput) priceInput.value = '';
+                this.pendingNewProductImage = '';
+            }
         } catch (_) {
-            this.showAlert('לא הצלחתי לזהות מוצר מהצילום. הוספתי את התמונה, מלא את השדות ידנית.', 'info');
+            this.showAlert('שגיאה בזיהוי המוצר. נסה שוב או הוסף ידנית.', 'info');
+        }
+    }
+
+    saveScannedProduct(detected, imageDataUrl) {
+        const selectedSupplier = document.getElementById('product-supplier-select')?.value || '';
+        const supplierId = detected.supplierId || selectedSupplier || (this.suppliers[0] && this.suppliers[0].id) || '';
+        const name = String(detected.name || '').trim();
+
+        if (!supplierId) {
+            alert('בחר ספק לפני צילום מוצר');
+            return false;
+        }
+        if (!name) return false;
+
+        const norm = (value) => String(value || '').trim().toLowerCase();
+        const existing = this.products.find(
+            (p) => p.supplierId === supplierId && norm(p.name) === norm(name)
+        );
+
+        if (existing) {
+            if (imageDataUrl) existing.image = imageDataUrl;
+            if (Number.isFinite(detected.price)) existing.price = detected.price;
+            if (detected.unit) existing.unit = detected.unit;
+            this.saveData('products', this.products);
+            this.showAlert(`✅ עודכן בבנק: ${name}`, 'success');
+        } else {
+            const newProduct = {
+                id: Date.now().toString(),
+                supplierId,
+                name,
+                price: Number.isFinite(detected.price) ? detected.price : 0,
+                unit: detected.unit || 'יחידה',
+                image: imageDataUrl || ''
+            };
+            this.products.push(newProduct);
+            this.saveData('products', this.products);
+            const confidenceText = Math.round((detected.confidence || 0) * 100);
+            this.showAlert(`✅ נוסף לבנק: ${name} (${confidenceText}% ביטחון)`, 'success');
+        }
+
+        this.renderAllProducts();
+        const currentSupplierId = document.getElementById('supplier-select')?.value;
+        if (currentSupplierId === supplierId) this.loadProducts(supplierId);
+        return true;
+    }
+
+    matchProductFromText(text) {
+        if (!text) return null;
+        const normalized = String(text).replace(/\s+/g, ' ').trim();
+        const lower = normalized.toLowerCase();
+        if (!normalized) return null;
+
+        const bankMatches = this.products
+            .slice()
+            .sort((a, b) => b.name.length - a.name.length);
+        for (const product of bankMatches) {
+            const productName = String(product.name || '').trim();
+            if (!productName) continue;
+            if (normalized.includes(productName) || lower.includes(productName.toLowerCase())) {
+                return {
+                    name: productName,
+                    supplierId: product.supplierId,
+                    unit: product.unit || 'יחידה',
+                    price: product.price,
+                    confidence: 0.93,
+                    source: 'bank'
+                };
+            }
+        }
+
+        const catalogMatches = PRODUCT_CATALOG.slice().sort((a, b) => b.kw.length - a.kw.length);
+        for (const entry of catalogMatches) {
+            const he = String(entry.he || '');
+            const kw = String(entry.kw || '');
+            const en = String(entry.en || '').toLowerCase();
+            if (
+                (kw && normalized.includes(kw)) ||
+                (he && normalized.includes(he)) ||
+                (en && lower.includes(en))
+            ) {
+                return {
+                    name: he,
+                    supplierId: entry.sup,
+                    unit: entry.unit || 'יחידה',
+                    price: entry.price,
+                    confidence: 0.86,
+                    source: 'catalog'
+                };
+            }
+        }
+
+        const hebrewPhrase = normalized.match(/[\u0590-\u05FF][\u0590-\u05FF0-9%'"״׳\-\.\s]{1,40}/);
+        if (hebrewPhrase) {
+            const guessedName = hebrewPhrase[0].trim();
+            if (guessedName.length >= 2) {
+                return {
+                    name: guessedName,
+                    supplierId: document.getElementById('product-supplier-select')?.value || '',
+                    unit: 'יחידה',
+                    price: 0,
+                    confidence: 0.42,
+                    source: 'ocr'
+                };
+            }
+        }
+
+        return null;
+    }
+
+    async extractTextFromImage(file) {
+        if (typeof Tesseract === 'undefined') return '';
+        try {
+            const result = await Tesseract.recognize(file, 'heb+eng', { logger: () => {} });
+            return (result && result.data && result.data.text) ? result.data.text : '';
+        } catch (_) {
+            return '';
         }
     }
 
     async detectProductFromImage(file) {
+        const [ocrText, barcode] = await Promise.all([
+            this.extractTextFromImage(file),
+            this.detectBarcodeFromFile(file)
+        ]);
+
+        const fromOcr = this.matchProductFromText(ocrText);
+        if (fromOcr) return fromOcr;
+
         const rawName = (file.name || '').replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ').trim();
-        const normalized = rawName.toLowerCase();
-        const barcode = await this.detectBarcodeFromFile(file);
-
-        let best = null;
-        if (normalized) {
-            const ranked = PRODUCT_CATALOG.slice().sort((a, b) => b.kw.length - a.kw.length);
-            best = ranked.find(e => normalized.includes(String(e.kw || '').toLowerCase()) || normalized.includes(String(e.he || '').toLowerCase())) || null;
+        const fromFileName = this.matchProductFromText(rawName);
+        if (fromFileName) {
+            return { ...fromFileName, confidence: Math.max(0.35, (fromFileName.confidence || 0) - 0.2) };
         }
 
-        if (!best && barcode) {
-            // Placeholder for future barcode catalog mapping
-            best = null;
+        if (barcode) {
+            const fromBarcode = this.products.find((p) => p.barcode && p.barcode === barcode);
+            if (fromBarcode) {
+                return {
+                    name: fromBarcode.name,
+                    supplierId: fromBarcode.supplierId,
+                    unit: fromBarcode.unit || 'יחידה',
+                    price: fromBarcode.price,
+                    confidence: 0.9,
+                    source: 'barcode'
+                };
+            }
         }
 
-        if (best) {
-            return {
-                name: best.he,
-                supplierId: best.sup,
-                unit: best.unit || 'יחידה',
-                price: best.price,
-                confidence: normalized ? 0.78 : 0.65
-            };
-        }
-
-        return {
-            name: rawName || 'מוצר חדש',
-            supplierId: document.getElementById('product-supplier-select')?.value || '',
-            unit: 'יחידה',
-            price: '',
-            confidence: rawName ? 0.45 : 0.25
-        };
+        return null;
     }
 
     async detectBarcodeFromFile(file) {

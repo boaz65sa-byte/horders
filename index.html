@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="styles.css">
     <link rel="manifest" href="manifest.json">
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
 <body>
     <!-- Login Screen -->
@@ -261,7 +262,7 @@
 
                     <button id="add-product-btn" class="btn btn-primary">➕ הוסף מוצר</button>
                     <button id="scan-product-btn" class="btn btn-primary" style="background:linear-gradient(135deg,#7E57C2,#5E35B1);">📷 צלם מוצר</button>
-                    <p class="help-text">צילום מוצר ימלא אוטומטית שם/ספק/יחידה לפי זיהוי ראשוני, ואז רק תאשר הוספה.</p>
+                    <p class="help-text">צלם את המוצר (שם/תווית/ברקוד) — המערכת תזהה אותו ותוסיף אוטומטית לבנק המוצרים בשם שזוהה.</p>
                 </div>
 
                 <!-- Products List -->
