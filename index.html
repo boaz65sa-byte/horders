@@ -263,7 +263,7 @@
 
                     <button id="add-product-btn" class="btn btn-primary">➕ הוסף מוצר</button>
                     <button id="scan-product-btn" class="btn btn-primary" style="background:linear-gradient(135deg,#7E57C2,#5E35B1);">📷 צלם מוצר</button>
-                    <p class="help-text">צלם את שם המוצר/התווית בקרוב ובתאורה טובה. אם הזיהוי לא מדויק — תוכל לתקן את השם לפני השמירה.</p>
+                    <p class="help-text">צלם את <strong>שם המוצר על האריזה</strong> בקרוב ובתאורה טובה. אחרי הצילום תבחר/תתקן את השם לפני השמירה.</p>
                 </div>
 
                 <!-- Products List -->
@@ -530,6 +530,33 @@
             <div class="modal-actions">
                 <button id="confirm-receive-btn" class="btn btn-primary">✅ אשר קבלה</button>
                 <button id="cancel-receive-btn" class="btn btn-secondary">❌ ביטול</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scan Product Confirm Modal -->
+    <div id="scan-product-modal" class="modal">
+        <div class="modal-content scan-modal-content">
+            <h2>📷 אישור מוצר מצילום</h2>
+            <div class="scan-preview-wrap">
+                <img id="scan-preview-img" alt="תצוגת מוצר" class="scan-preview-img">
+            </div>
+            <p class="help-text">בחר את שורת הטקסט הנכונה מהתווית (לחיצה על שורה), או הקלד שם ידנית:</p>
+            <div id="scan-ocr-lines" class="scan-ocr-lines"></div>
+            <label for="scan-product-name">שם המוצר:</label>
+            <input type="text" id="scan-product-name" class="input-field" placeholder="שם המוצר">
+            <label for="scan-product-supplier">ספק:</label>
+            <select id="scan-product-supplier" class="input-field"></select>
+            <label for="scan-product-unit">יחידה:</label>
+            <select id="scan-product-unit" class="input-field">
+                <option value="יחידה">יחידה</option>
+                <option value="ק״ג">ק״ג</option>
+                <option value="ארגז">ארגז</option>
+                <option value="קרטון">קרטון</option>
+            </select>
+            <div class="modal-actions">
+                <button id="confirm-scan-product-btn" class="btn btn-primary">✅ שמור לבנק</button>
+                <button id="cancel-scan-product-btn" class="btn btn-secondary">❌ ביטול</button>
             </div>
         </div>
     </div>

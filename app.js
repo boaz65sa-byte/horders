@@ -834,6 +834,11 @@ class OrderSystem {
         const scanProductBtn = document.getElementById('scan-product-btn');
         if (scanProductBtn) scanProductBtn.addEventListener('click', () => this.startScanNewProduct());
 
+        const confirmScanProductBtn = document.getElementById('confirm-scan-product-btn');
+        if (confirmScanProductBtn) confirmScanProductBtn.addEventListener('click', () => this.confirmScannedProduct());
+        const cancelScanProductBtn = document.getElementById('cancel-scan-product-btn');
+        if (cancelScanProductBtn) cancelScanProductBtn.addEventListener('click', () => this.closeScanProductModal());
+
         const autofillImagesBtn = document.getElementById('autofill-images-btn');
         if (autofillImagesBtn) autofillImagesBtn.addEventListener('click', () => this.autoFillImages(false));
 
@@ -2854,59 +2859,122 @@ class OrderSystem {
                 return;
             }
 
-            this.showAlert('🔍 מזהה מוצר מהתמונה (עד 30 שניות)...', 'info');
-            const scanInput = await this.prepareImageForOcr(file);
-            const dataUrl = await this.compressImage(file, 320, 0.8);
-            let detected = await this.detectProductFromImage(scanInput);
-
-            if (!detected || !detected.name) {
-                const ocrText = await this.extractTextFromImage(scanInput);
-                const guess = this.buildDetectionFromRawOcr(ocrText);
-                if (guess && guess.name) {
-                    const confirmed = prompt(
-                        `זיהיתי מהתמונה:\n"${guess.name}"\n\nתקן את השם אם צריך ולחץ אישור:`,
-                        guess.name
-                    );
-                    if (!confirmed || !confirmed.trim()) return;
-                    detected = {
-                        ...guess,
-                        name: confirmed.trim(),
-                        confidence: Math.max(0.35, guess.confidence || 0.35),
-                        source: 'ocr-manual'
-                    };
-                } else {
-                    this.showAlert('לא הצלחתי לזהות את המוצר. צלם שוב את השם/התווית בקרוב, בתאורה טובה.', 'info');
-                    return;
-                }
-            } else if ((detected.confidence || 0) < 0.7) {
-                const confirmed = prompt(
-                    `זיהיתי:\n"${detected.name}"\n\nלאשר או לתקן את השם:`,
-                    detected.name
-                );
-                if (!confirmed || !confirmed.trim()) return;
-                detected.name = confirmed.trim();
-            }
-
-            const supplierSelect = document.getElementById('product-supplier-select');
-            const nameInput = document.getElementById('product-name');
-            const unitSelect = document.getElementById('product-unit');
-            const priceInput = document.getElementById('product-price');
-
-            if (supplierSelect && detected.supplierId) supplierSelect.value = detected.supplierId;
-            if (nameInput) nameInput.value = detected.name;
-            if (unitSelect && detected.unit) unitSelect.value = detected.unit;
-            if (priceInput && Number.isFinite(detected.price)) priceInput.value = detected.price;
-
-            const saved = this.saveScannedProduct(detected, dataUrl);
-            if (saved) {
-                if (nameInput) nameInput.value = '';
-                if (priceInput) priceInput.value = '';
-                this.pendingNewProductImage = '';
-            }
+            this.showAlert('🔍 קורא טקסט מהתמונה (עד 30 שניות)...', 'info');
+            const assets = await this.prepareScanImage(file);
+            const analysis = await this.analyzeScanImage(assets.ocrBlob);
+            this.openScanConfirmModal({
+                imageDataUrl: assets.storageDataUrl,
+                ...analysis
+            });
         } catch (err) {
             console.error('Product scan failed:', err);
             this.showAlert('שגיאה בזיהוי המוצר. נסה שוב או הוסף ידנית.', 'info');
         }
+    }
+
+    openScanConfirmModal(data) {
+        this.pendingScanData = data;
+        const modal = document.getElementById('scan-product-modal');
+        const preview = document.getElementById('scan-preview-img');
+        const nameInput = document.getElementById('scan-product-name');
+        const supplierSelect = document.getElementById('scan-product-supplier');
+        const unitSelect = document.getElementById('scan-product-unit');
+        const linesEl = document.getElementById('scan-ocr-lines');
+
+        if (preview) preview.src = data.imageDataUrl || '';
+        if (nameInput) nameInput.value = data.suggestedName || '';
+
+        if (supplierSelect) {
+            const prev = supplierSelect.value;
+            supplierSelect.innerHTML = '<option value="">-- בחר ספק --</option>';
+            this.suppliers.forEach((s) => {
+                const opt = document.createElement('option');
+                opt.value = s.id;
+                opt.textContent = s.name;
+                supplierSelect.appendChild(opt);
+            });
+            const defaultSupplier = data.supplierId
+                || document.getElementById('product-supplier-select')?.value
+                || prev
+                || (this.suppliers[0] && this.suppliers[0].id)
+                || '';
+            if (defaultSupplier) supplierSelect.value = defaultSupplier;
+        }
+
+        if (unitSelect && data.unit) unitSelect.value = data.unit;
+
+        if (linesEl) {
+            const lines = Array.isArray(data.lines) ? data.lines : [];
+            if (!lines.length) {
+                linesEl.innerHTML = '<p class="scan-ocr-empty">לא זוהה טקסט — הקלד את שם המוצר ידנית למעלה</p>';
+            } else {
+                linesEl.innerHTML = lines.map((line, i) =>
+                    `<button type="button" class="scan-ocr-line${i === 0 ? ' selected' : ''}" data-line-index="${i}">${this.escapeHtml(line.text)}</button>`
+                ).join('');
+                linesEl.querySelectorAll('.scan-ocr-line').forEach((btn) => {
+                    btn.addEventListener('click', () => {
+                        linesEl.querySelectorAll('.scan-ocr-line').forEach((b) => b.classList.remove('selected'));
+                        btn.classList.add('selected');
+                        const idx = parseInt(btn.dataset.lineIndex, 10);
+                        if (nameInput && lines[idx]) nameInput.value = lines[idx].text;
+                    });
+                });
+            }
+        }
+
+        if (modal) modal.classList.add('active');
+        if (nameInput) nameInput.focus();
+    }
+
+    closeScanProductModal() {
+        const modal = document.getElementById('scan-product-modal');
+        if (modal) modal.classList.remove('active');
+        this.pendingScanData = null;
+    }
+
+    confirmScannedProduct() {
+        const name = document.getElementById('scan-product-name')?.value.trim() || '';
+        const supplierId = document.getElementById('scan-product-supplier')?.value || '';
+        const unit = document.getElementById('scan-product-unit')?.value || 'יחידה';
+
+        if (!name) {
+            alert('נא להזין שם מוצר');
+            return;
+        }
+        if (!supplierId) {
+            alert('נא לבחור ספק');
+            return;
+        }
+
+        const imageDataUrl = this.pendingScanData?.imageDataUrl || '';
+        const detected = {
+            name,
+            supplierId,
+            unit,
+            price: this.pendingScanData?.price,
+            confidence: this.pendingScanData?.confidence || 0.5,
+            source: 'scan-confirm'
+        };
+
+        const productSupplierSelect = document.getElementById('product-supplier-select');
+        if (productSupplierSelect) productSupplierSelect.value = supplierId;
+
+        const saved = this.saveScannedProduct(detected, imageDataUrl);
+        if (saved) {
+            this.closeScanProductModal();
+            const nameInput = document.getElementById('product-name');
+            const priceInput = document.getElementById('product-price');
+            if (nameInput) nameInput.value = '';
+            if (priceInput) priceInput.value = '';
+        }
+    }
+
+    escapeHtml(text) {
+        return String(text || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
     }
 
     saveScannedProduct(detected, imageDataUrl) {
@@ -2929,7 +2997,13 @@ class OrderSystem {
             if (imageDataUrl) existing.image = imageDataUrl;
             if (Number.isFinite(detected.price)) existing.price = detected.price;
             if (detected.unit) existing.unit = detected.unit;
-            this.saveData('products', this.products);
+            try {
+                this.saveData('products', this.products);
+            } catch (e) {
+                if (imageDataUrl) delete existing.image;
+                alert('לא ניתן לשמור את התמונה (אין מספיק מקום). המוצר עודכן בלי תמונה.');
+                this.saveData('products', this.products);
+            }
             this.showAlert(`✅ עודכן בבנק: ${name}`, 'success');
         } else {
             const newProduct = {
@@ -2941,9 +3015,27 @@ class OrderSystem {
                 image: imageDataUrl || ''
             };
             this.products.push(newProduct);
-            this.saveData('products', this.products);
-            const confidenceText = Math.round((detected.confidence || 0) * 100);
-            this.showAlert(`✅ נוסף לבנק: ${name} (${confidenceText}% ביטחון)`, 'success');
+            try {
+                this.saveData('products', this.products);
+                this.showAlert(`✅ נוסף לבנק: ${name}${newProduct.image ? '' : ' (בלי תמונה — אין מספיק מקום)'}`, 'success');
+            } catch (e) {
+                this.products.pop();
+                if (imageDataUrl) {
+                    newProduct.image = '';
+                    this.products.push(newProduct);
+                    try {
+                        this.saveData('products', this.products);
+                        this.showAlert(`✅ נוסף לבנק: ${name} (בלי תמונה — אין מספיק מקום)`, 'success');
+                    } catch (e2) {
+                        this.products.pop();
+                        alert('שגיאה בשמירה. נסה למחוק תמונות ישנות או לצמצם נתונים.');
+                        return false;
+                    }
+                } else {
+                    alert('שגיאה בשמירה. נסה שוב.');
+                    return false;
+                }
+            }
         }
 
         this.renderAllProducts();
@@ -3172,13 +3264,196 @@ class OrderSystem {
         }
     }
 
-    prepareImageForOcr(file) {
+    rankOcrLines(text) {
+        const rawLines = String(text)
+            .split(/\n+/)
+            .map((line) => this.cleanOcrLine(line))
+            .filter((line) => line.length >= 2 && line.length <= 55);
+
+        const scored = [];
+        const seen = new Set();
+
+        for (const line of rawLines) {
+            const key = line.toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+
+            const hebrewCount = (line.match(/[\u0590-\u05FF]/g) || []).length;
+            if (hebrewCount < 2) continue;
+
+            let score = hebrewCount * 3;
+            const words = line.split(' ').filter(Boolean);
+            if (words.length >= 2 && words.length <= 5) score += 20;
+            if (/^\d+[\s%]|גרם|מ"ל|ק"ג|kg|ml|g\b/i.test(line)) score -= 25;
+            if (/professional|unilever|קנור|knorr|ישראל|ltd|בע"מ|תעודת|כשר/i.test(line)) score -= 20;
+            if (/דגש|תבלין|רוטב|אבקת|תערובת|מרק|ממרח|רוטב/i.test(line)) score += 22;
+            if (/בצל|עגבני|חלב|גבינ|עוף|בשר|שמן|סוכר|קמח|אורז|פסטה/i.test(line)) score += 10;
+
+            scored.push({ text: line, score });
+        }
+
+        scored.sort((a, b) => b.score - a.score);
+        return scored.slice(0, 8);
+    }
+
+    cleanOcrLine(line) {
+        return this.normalizeScanText(
+            String(line)
+                .replace(/[^\u0590-\u05FFA-Za-z0-9%'"״׳\-\.\s]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim()
+        );
+    }
+
+    async analyzeScanImage(ocrBlob) {
+        const [ocrText, barcode] = await Promise.all([
+            this.extractTextFromImage(ocrBlob),
+            ocrBlob instanceof Blob ? this.detectBarcodeFromBlob(ocrBlob) : Promise.resolve('')
+        ]);
+
+        const lines = this.rankOcrLines(ocrText);
+        const title = this.extractProductTitleFromOcr(ocrText);
+        const bankMatch = this.findBestBankMatchForScan(ocrText);
+        const catalogMatch = this.findBestCatalogMatchForScan(ocrText);
+
+        let suggestedName = '';
+        let supplierId = '';
+        let unit = 'יחידה';
+        let price;
+        let confidence = 0.4;
+        let source = 'ocr';
+
+        if (title && title.name) {
+            suggestedName = title.name;
+            confidence = title.confidence || 0.7;
+            source = 'ocr-title';
+        } else if (lines[0]) {
+            suggestedName = lines[0].text;
+            confidence = Math.min(0.65, 0.35 + lines[0].score / 100);
+            source = 'ocr-line';
+        }
+
+        if (bankMatch && (bankMatch.score || 0) > (title?.score || lines[0]?.score || 0)) {
+            suggestedName = bankMatch.name;
+            supplierId = bankMatch.supplierId;
+            unit = bankMatch.unit || unit;
+            price = bankMatch.price;
+            confidence = bankMatch.confidence;
+            source = 'bank';
+        } else if (catalogMatch && !title && catalogMatch.score >= 20) {
+            suggestedName = catalogMatch.name;
+            supplierId = catalogMatch.supplierId;
+            unit = catalogMatch.unit || unit;
+            price = catalogMatch.price;
+            confidence = catalogMatch.confidence;
+            source = 'catalog';
+        } else {
+            if (bankMatch && bankMatch.supplierId && !supplierId) supplierId = bankMatch.supplierId;
+            if (catalogMatch && catalogMatch.supplierId && !supplierId) {
+                supplierId = catalogMatch.supplierId;
+                unit = catalogMatch.unit || unit;
+                price = catalogMatch.price;
+            }
+        }
+
+        if (barcode) {
+            const fromBarcode = this.products.find((p) => p.barcode && p.barcode === barcode);
+            if (fromBarcode) {
+                suggestedName = fromBarcode.name;
+                supplierId = fromBarcode.supplierId;
+                unit = fromBarcode.unit || unit;
+                price = fromBarcode.price;
+                confidence = 0.95;
+                source = 'barcode';
+            }
+        }
+
+        return {
+            ocrText,
+            lines,
+            suggestedName,
+            supplierId,
+            unit,
+            price,
+            confidence,
+            source,
+            barcode
+        };
+    }
+
+    findBestBankMatchForScan(text) {
+        const normalized = this.normalizeScanText(text);
+        if (!normalized) return null;
+
+        let best = null;
+        let bestScore = 0;
+
+        for (const product of this.products) {
+            const productName = String(product.name || '').trim();
+            if (productName.length < 5) continue;
+            if (!normalized.includes(productName)) continue;
+
+            const score = productName.length * 5;
+            if (score > bestScore) {
+                bestScore = score;
+                best = {
+                    name: productName,
+                    supplierId: product.supplierId,
+                    unit: product.unit || 'יחידה',
+                    price: product.price,
+                    confidence: 0.92,
+                    source: 'bank',
+                    score
+                };
+            }
+        }
+
+        return best;
+    }
+
+    findBestCatalogMatchForScan(text) {
+        const normalized = this.normalizeScanText(text);
+        if (!normalized) return null;
+
+        let best = null;
+        let bestScore = 0;
+        const lower = normalized.toLowerCase();
+
+        for (const entry of PRODUCT_CATALOG) {
+            const he = String(entry.he || '').trim();
+            const kw = String(entry.kw || '').trim();
+            let score = 0;
+
+            if (he.length >= 5 && normalized.includes(he)) {
+                score = he.length * 4;
+            } else if (kw.length >= 6 && this.containsScanTerm(normalized, kw)) {
+                score = kw.length * 3;
+            }
+
+            if (score > bestScore) {
+                bestScore = score;
+                best = {
+                    name: he,
+                    supplierId: entry.sup,
+                    unit: entry.unit || 'יחידה',
+                    price: entry.price,
+                    confidence: 0.85,
+                    source: 'catalog',
+                    score
+                };
+            }
+        }
+
+        return bestScore >= 15 ? best : null;
+    }
+
+    prepareScanImage(file) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = (e) => {
                 const img = new Image();
                 img.onload = () => {
-                    const minSide = 1000;
+                    const minSide = 1200;
                     let { width, height } = img;
                     const scale = Math.max(minSide / width, minSide / height, 1);
                     width = Math.round(width * scale);
@@ -3188,7 +3463,7 @@ class OrderSystem {
                     canvas.width = width;
                     canvas.height = height;
                     const ctx = canvas.getContext('2d');
-                    ctx.filter = 'contrast(1.25) brightness(1.05)';
+                    ctx.filter = 'contrast(1.3) brightness(1.08)';
                     ctx.drawImage(img, 0, 0, width, height);
                     ctx.filter = 'none';
 
@@ -3196,14 +3471,33 @@ class OrderSystem {
                     const pixels = imageData.data;
                     for (let i = 0; i < pixels.length; i += 4) {
                         const gray = 0.299 * pixels[i] + 0.587 * pixels[i + 1] + 0.114 * pixels[i + 2];
-                        const boosted = Math.min(255, Math.max(0, (gray - 128) * 1.35 + 128));
+                        const boosted = Math.min(255, Math.max(0, (gray - 128) * 1.4 + 128));
                         pixels[i] = pixels[i + 1] = pixels[i + 2] = boosted;
                     }
                     ctx.putImageData(imageData, 0, 0);
 
+                    const storageMax = 360;
+                    let sw = width;
+                    let sh = height;
+                    if (sw > sh && sw > storageMax) {
+                        sh = Math.round(sh * (storageMax / sw));
+                        sw = storageMax;
+                    } else if (sh > storageMax) {
+                        sw = Math.round(sw * (storageMax / sh));
+                        sh = storageMax;
+                    }
+                    const storageCanvas = document.createElement('canvas');
+                    storageCanvas.width = sw;
+                    storageCanvas.height = sh;
+                    storageCanvas.getContext('2d').drawImage(canvas, 0, 0, sw, sh);
+                    const storageDataUrl = storageCanvas.toDataURL('image/jpeg', 0.82);
+
                     canvas.toBlob((blob) => {
-                        if (blob) resolve(blob);
-                        else resolve(canvas);
+                        if (!blob) {
+                            reject(new Error('Failed to process image'));
+                            return;
+                        }
+                        resolve({ ocrBlob: blob, storageDataUrl });
                     }, 'image/jpeg', 0.92);
                 };
                 img.onerror = reject;
@@ -3212,6 +3506,10 @@ class OrderSystem {
             reader.onerror = reject;
             reader.readAsDataURL(file);
         });
+    }
+
+    prepareImageForOcr(file) {
+        return this.prepareScanImage(file).then((assets) => assets.ocrBlob);
     }
 
     async detectProductFromImage(input) {
