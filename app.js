@@ -341,8 +341,8 @@ class AuthSystem {
                 const roleLabel = isAdmin ? '👑 מנהל' : '👤 עובד';
                 roleBadge.textContent = this.currentUser.name ? `${this.currentUser.name} · ${roleLabel}` : roleLabel;
                 // Settings + Approvals (chef) tabs are admin-only
-                if (settingsTab) settingsTab.style.display = isAdmin ? 'block' : 'none';
-                if (approvalsTab) approvalsTab.style.display = isAdmin ? 'block' : 'none';
+                if (settingsTab) settingsTab.classList.toggle('tab-hidden', !isAdmin);
+                if (approvalsTab) approvalsTab.classList.toggle('tab-hidden', !isAdmin);
 
                 // Refresh the pending-approvals badge once the order system exists
                 if (isAdmin && typeof orderSystem !== 'undefined' && orderSystem) {

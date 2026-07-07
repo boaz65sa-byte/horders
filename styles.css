@@ -43,13 +43,31 @@ header h1 {
 /* Tabs Navigation */
 .tabs {
     display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
     background: #f5f5f5;
     border-bottom: 2px solid #ddd;
 }
 
+.tabs-scroll-hint {
+    display: none;
+    margin: 0;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: #777;
+    text-align: center;
+    background: #f5f5f5;
+    border-bottom: 1px solid #e5e5e5;
+}
+
 .tab-btn {
-    flex: 1;
-    padding: 15px 10px;
+    flex: 0 0 auto;
+    min-width: fit-content;
+    white-space: nowrap;
+    padding: 15px 14px;
     border: none;
     background: transparent;
     cursor: pointer;
@@ -58,6 +76,11 @@ header h1 {
     color: #666;
     transition: all 0.3s;
     border-bottom: 3px solid transparent;
+    scroll-snap-align: start;
+}
+
+.tab-btn.tab-hidden {
+    display: none;
 }
 
 .tab-btn:hover {
@@ -464,7 +487,11 @@ label {
 
     .tab-btn {
         font-size: 12px;
-        padding: 12px 5px;
+        padding: 11px 12px;
+    }
+
+    .tabs-scroll-hint {
+        display: block;
     }
 
     .product-item {

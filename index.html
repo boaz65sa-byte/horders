@@ -69,17 +69,18 @@
         </div>
 
         <!-- Tabs Navigation -->
-        <nav class="tabs">
+        <nav class="tabs" aria-label="ניווט ראשי">
             <button class="tab-btn active" data-tab="dashboard">🏠 בית</button>
             <button class="tab-btn" data-tab="order">🛍️ הזמנה</button>
             <button class="tab-btn" data-tab="inventory">📦 מלאי</button>
             <button class="tab-btn" data-tab="needs">🚩 חוסרים<span id="needs-badge" class="tab-badge" style="display: none;">0</span></button>
             <button class="tab-btn" data-tab="products">📦 מוצרים</button>
             <button class="tab-btn" data-tab="suppliers">👥 ספקים</button>
-            <button class="tab-btn" data-tab="approvals" id="approvals-tab-btn" style="display: none;">✅ אישורים<span id="approvals-badge" class="tab-badge" style="display: none;">0</span></button>
+            <button class="tab-btn tab-admin-only tab-hidden" data-tab="approvals" id="approvals-tab-btn">✅ אישורים<span id="approvals-badge" class="tab-badge" style="display: none;">0</span></button>
+            <button class="tab-btn tab-admin-only tab-hidden" data-tab="settings" id="settings-tab-btn">⚙️ הגדרות</button>
             <button class="tab-btn" data-tab="history">📋 היסטוריה</button>
-            <button class="tab-btn" data-tab="settings" id="settings-tab-btn" style="display: none;">⚙️ הגדרות</button>
         </nav>
+        <p class="tabs-scroll-hint">↔️ החלק לצדדים לראות את כל הלשוניות</p>
 
         <!-- Tab Contents -->
         <div class="tab-content active" id="dashboard-tab">
