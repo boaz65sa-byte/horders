@@ -3147,8 +3147,9 @@ class OrderSystem {
                 opt.textContent = s.name;
                 supplierSelect.appendChild(opt);
             });
-            const defaultSupplier = data.supplierId
-                || document.getElementById('product-supplier-select')?.value
+            const selectedSupplier = document.getElementById('product-supplier-select')?.value || '';
+            const defaultSupplier = selectedSupplier
+                || data.supplierId
                 || prev
                 || (this.suppliers[0] && this.suppliers[0].id)
                 || '';
@@ -3223,17 +3224,9 @@ class OrderSystem {
         }
     }
 
-    escapeHtml(text) {
-        return String(text || '')
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;');
-    }
-
     saveScannedProduct(detected, imageDataUrl) {
         const selectedSupplier = document.getElementById('product-supplier-select')?.value || '';
-        const supplierId = detected.supplierId || selectedSupplier || (this.suppliers[0] && this.suppliers[0].id) || '';
+        const supplierId = selectedSupplier || detected.supplierId || (this.suppliers[0] && this.suppliers[0].id) || '';
         const name = String(detected.name || '').trim();
 
         if (!supplierId) {
@@ -4113,53 +4106,6 @@ class OrderSystem {
     // Everyone creates orders; all go to chef for approval before sending to supplier
     submitOrder() {
         this.submitForApproval();
-    }
-
-    // Chef/admin: build order and send immediately without pending step
-    async submitAndSendDirectly() {
-        const supplierId = document.getElementById('supplier-select').value;
-        const supplier = this.suppliers.find(s => s.id === supplierId);
-        const orderItems = this.getOrderItems();
-
-        if (!supplier || orderItems.length === 0) {
-            alert('נא לבחור ספק ולהוסיף מוצרים לסל');
-            return;
-        }
-
-        if (!confirm(`לאשר ולשלוח את ההזמנה לספק "${supplier.name}"?`)) return;
-
-        const emailPayload = this.getCurrentOrderEmailPayload();
-        const message = emailPayload ? emailPayload.text : '';
-        const deliveryDate = document.getElementById('delivery-date').value;
-        const procurementEmail = this.approvalSettings.procurementEmail;
-        const orderId = Date.now().toString();
-
-        await this.dispatchOrder(supplier, message, this.preferences.sendMethod, procurementEmail, emailPayload);
-
-        const managerPhone = this.approvalSettings.managerPhone;
-        if (managerPhone) {
-            const managerMessage = `📋 הזמנה אושרה ונשלחה לספק\nספק: ${supplier.name}\n\n${message}`;
-            setTimeout(() => this.openWhatsApp(managerPhone, managerMessage), 1200);
-        }
-
-        this.history.unshift({
-            id: orderId,
-            date: new Date().toISOString(),
-            supplier: supplier.name,
-            items: orderItems,
-            message: message,
-            deliveryDate: deliveryDate,
-            sendMethod: this.preferences.sendMethod,
-            showedPrices: this.preferences.showPrices,
-            createdByName: (typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.name) ? authSystem.currentUser.name : '',
-            approvedByName: (typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.name) ? authSystem.currentUser.name : '',
-            approved: true
-        });
-        this.saveData('history', this.history);
-
-        this.clearOrder();
-        this.loadHistory();
-        this.showAlert('✅ ההזמנה אושרה ונשלחה לספק', 'success');
     }
 
     // Submit order for chef approval (all users, including chef)
