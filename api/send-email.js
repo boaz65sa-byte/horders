@@ -12,6 +12,7 @@
 //   EMAIL_FROM=orders@your-verified-domain.com
 
 const PLACEHOLDER_DOMAINS = ['example.com', 'example.org', 'example.net', 'test.com', 'localhost', 'invalid'];
+const { checkApiKey } = require('./auth');
 
 function parseBody(req) {
     return typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
@@ -119,6 +120,7 @@ async function sendViaResend({ from, to, bcc, subject, text, html, replyTo }) {
 }
 
 module.exports = async (req, res) => {
+    if (!checkApiKey(req, res)) return;
     if (req.method === 'GET') {
         const from = getFromAddress();
         const provider = emailProvider();

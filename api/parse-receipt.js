@@ -2,8 +2,10 @@
 // Body: { image: "data:image/jpeg;base64,..." }
 // Returns: { supplierName, documentType, items: [{ sku, name, quantity, unit }] }
 const Anthropic = require('@anthropic-ai/sdk');
+const { checkApiKey } = require('./auth');
 
 module.exports = async (req, res) => {
+    if (!checkApiKey(req, res)) return;
     if (req.method !== 'POST') {
         res.status(405).json({ error: 'method not allowed' });
         return;

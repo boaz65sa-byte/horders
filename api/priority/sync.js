@@ -1,4 +1,5 @@
 const priority = require('../../priority-client');
+const { checkApiKey } = require('../auth');
 
 const SUPPLIER_FORM = process.env.PRIORITY_SUPPLIERS_FORM || 'SUPPLIERS';
 const PARTS_FORM = process.env.PRIORITY_PARTS_FORM || 'LOGPART';
@@ -31,6 +32,7 @@ function mapPart(row) {
 }
 
 module.exports = async (req, res) => {
+    if (!checkApiKey(req, res)) return;
     if (req.method !== 'POST') {
         res.status(405).json({ error: 'method not allowed' });
         return;

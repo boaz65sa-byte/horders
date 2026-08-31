@@ -3,8 +3,10 @@
 // Returns: { name, category } (Hebrew) — the client fuzzy-matches it against the product bank.
 // Requires ANTHROPIC_API_KEY in Vercel env; returns 503 with a clear message when missing.
 const Anthropic = require('@anthropic-ai/sdk');
+const { checkApiKey } = require('./auth');
 
 module.exports = async (req, res) => {
+    if (!checkApiKey(req, res)) return;
     if (req.method !== 'POST') {
         res.status(405).json({ error: 'method not allowed' });
         return;

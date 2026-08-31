@@ -1,6 +1,7 @@
 // GET  /api/backup — full export of shared bank (download snapshot)
 // POST /api/backup — save snapshot copy inside KV (backup:latest + backup:history:ISO)
 const kv = require('../kvclient');
+const { checkApiKey } = require('./auth');
 
 const ARRAY_KEYS = ['products', 'suppliers', 'staff', 'users', 'pendingOrders', 'history', 'needs'];
 const OBJECT_KEYS = ['approvalSettings'];
@@ -13,6 +14,8 @@ async function readAll() {
 }
 
 module.exports = async (req, res) => {
+    if (!checkApiKey(req, res)) return;
+
     if (!kv.configured()) {
         res.status(503).json({ error: 'KV not configured', envHints: kv.envHints() });
         return;

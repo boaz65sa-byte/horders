@@ -1,6 +1,8 @@
 const priority = require('../../priority-client');
+const { checkApiKey } = require('../auth');
 
 module.exports = async (req, res) => {
+    if (!checkApiKey(req, res)) return;
     if (req.method !== 'GET') {
         res.status(405).json({ error: 'method not allowed' });
         return;

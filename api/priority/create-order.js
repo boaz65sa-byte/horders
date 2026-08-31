@@ -1,4 +1,5 @@
 const priority = require('../../priority-client');
+const { checkApiKey } = require('../auth');
 
 const ORDERS_FORM = process.env.PRIORITY_ORDERS_FORM || 'PORDERS';
 const LINES_SUBFORM = process.env.PRIORITY_ORDER_LINES_SUBFORM || 'PORDERITEMS_SUBFORM';
@@ -29,6 +30,7 @@ function resolveSupname(supplier) {
 }
 
 module.exports = async (req, res) => {
+    if (!checkApiKey(req, res)) return;
     if (req.method !== 'POST') {
         res.status(405).json({ error: 'method not allowed' });
         return;

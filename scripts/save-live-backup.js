@@ -7,7 +7,10 @@ const SOURCE = process.argv[2] || 'https://horders.vercel.app/api/data';
 const OUT_DIR = path.join(__dirname, '..', 'snapshots');
 
 async function main() {
-    const r = await fetch(SOURCE);
+    const headers = {};
+    const apiKey = process.env.BANK_API_KEY || '';
+    if (apiKey) headers['x-api-key'] = apiKey;
+    const r = await fetch(SOURCE, { headers });
     if (!r.ok) {
         console.error('Fetch failed:', r.status, await r.text());
         process.exit(1);

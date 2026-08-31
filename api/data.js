@@ -2,11 +2,14 @@
 // GET  -> { products, suppliers, staff, pendingOrders, history }  (null per key if unset)
 // POST -> any subset of those arrays; each provided array is saved.
 const kv = require('../kvclient');
+const { checkApiKey } = require('./auth');
 
 const ARRAY_KEYS = ['products', 'suppliers', 'staff', 'users', 'pendingOrders', 'history', 'needs'];
 const OBJECT_KEYS = ['approvalSettings']; // shared config objects (phones, procurement email)
 
 module.exports = async (req, res) => {
+    if (!checkApiKey(req, res)) return;
+
     if (!kv.configured()) {
         res.status(503).json({ error: 'KV not configured', envHints: kv.envHints() });
         return;

@@ -165,6 +165,25 @@ const DEFAULT_USERS = [
     { id: 'u6', name: 'עובד מטבח', password: '654321', role: 'employee' }
 ];
 
+async function hashPassword(plain) {
+    const enc = new TextEncoder();
+    const data = enc.encode('horders-v1:' + String(plain || ''));
+    const buf = await crypto.subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function isPasswordHashed(value) {
+    return /^[a-f0-9]{64}$/i.test(String(value || ''));
+}
+
+async function verifyUserPassword(user, plain) {
+    if (!user) return false;
+    if (isPasswordHashed(user.password)) {
+        return (await hashPassword(plain)) === user.password;
+    }
+    return String(user.password) === String(plain);
+}
+
 // Reads the users list from localStorage, or returns sensible defaults (not persisted)
 function loadUsers() {
     try {
@@ -206,15 +225,13 @@ class AuthSystem {
         const loginInput = document.getElementById('login-code');
         
         if (loginBtn) {
-            loginBtn.addEventListener('click', () => {
-                this.login();
-            });
+            loginBtn.addEventListener('click', () => { void this.login(); });
         }
         
         if (loginInput) {
             loginInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
-                    this.login();
+                    void this.login();
                 }
             });
         }
@@ -252,7 +269,7 @@ class AuthSystem {
         }
     }
 
-    login() {
+    async login() {
         const codeInput = document.getElementById('login-code');
         const errorDiv = document.getElementById('login-error');
         
@@ -273,9 +290,20 @@ class AuthSystem {
             return;
         }
 
-        // Authenticate against the per-user list (name + personal password)
-        const user = loadUsers().find(u => u.name === name);
-        if (user && String(user.password) === password) {
+        const users = loadUsers();
+        const user = users.find(u => u.name === name);
+        const ok = user && await verifyUserPassword(user, password);
+        if (ok) {
+            if (!isPasswordHashed(user.password)) {
+                user.password = await hashPassword(password);
+                const idx = users.findIndex(u => u.id === user.id);
+                if (idx >= 0) users[idx] = user;
+                localStorage.setItem('users', JSON.stringify(users));
+                if (typeof orderSystem !== 'undefined' && orderSystem) {
+                    orderSystem.users = users;
+                    orderSystem.saveData('users', users);
+                }
+            }
             this.currentUser = { id: user.id, role: user.role, name: user.name };
             this.saveData('currentUser', this.currentUser);
             this.showApp();
@@ -708,13 +736,66 @@ class OrderSystem {
         return data ? JSON.parse(data) : null;
     }
 
+    getBankApiKey() {
+        return String(localStorage.getItem('bankApiKey') || '').trim();
+    }
+
+    saveBankApiKey(key) {
+        const v = String(key || '').trim();
+        if (v) localStorage.setItem('bankApiKey', v);
+        else localStorage.removeItem('bankApiKey');
+    }
+
+    getApiHeaders(extra) {
+        const headers = { ...(extra || {}) };
+        const key = this.getBankApiKey();
+        if (key) headers['x-api-key'] = key;
+        return headers;
+    }
+
+    getSuppliersMissingEmail() {
+        return this.suppliers.filter(s =>
+            !s.isGeneralWarehouse && s.id !== '__warehouse_general__' && this.isPlaceholderEmail(s.email)
+        );
+    }
+
+    renderSupplierEmailWarnings() {
+        const missing = this.getSuppliersMissingEmail();
+        const settingsEl = document.getElementById('supplier-email-warnings');
+        if (settingsEl) {
+            if (!missing.length) {
+                settingsEl.innerHTML = '<span style="color:#2e7d32;font-weight:600;">✅ לכל הספקים יש מייל תקין</span>';
+            } else {
+                settingsEl.innerHTML = `<span style="color:#e65100;font-weight:700;">⚠️ ${missing.length} ספקים ללא מייל אמיתי:</span> ` +
+                    missing.map(s => this.escapeHtml(s.name)).join(' · ') +
+                    ' — עדכן בטאב <strong>ספקים</strong> לפני שליחה במייל.';
+            }
+        }
+        const warn = document.getElementById('supplier-email-warning');
+        if (warn && document.getElementById('supplier-select')) {
+            const sid = document.getElementById('supplier-select').value;
+            const supplier = this.suppliers.find(s => s.id === sid);
+            if (supplier && this.isPlaceholderEmail(supplier.email)) {
+                warn.style.display = 'block';
+                warn.className = 'alert alert-info';
+                warn.textContent = `⚠️ לספק "${supplier.name}" אין מייל אמיתי — שליחה במייל לא תעבוד. עדכן בטאב ספקים.`;
+            } else {
+                warn.style.display = 'none';
+            }
+        }
+    }
+
     // ===========================
     // Shared bank (KV-backed, cross-device) — falls back to localStorage if not configured
     // ===========================
 
     async initSharedBank() {
         try {
-            const r = await fetch('/api/data');
+            const r = await fetch('/api/data', { headers: this.getApiHeaders() });
+            if (r.status === 401) {
+                this.sharedBankAuthFailed = true;
+                return;
+            }
             if (!r.ok) return; // KV not configured → stay local-only
             const data = await r.json();
             this.sharedBankActive = true;
@@ -746,7 +827,7 @@ class OrderSystem {
                 missing.forEach(k => { payload[k] = this[k]; });
                 fetch('/api/data', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: this.getApiHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify(payload)
                 }).catch(() => {});
             }
@@ -794,7 +875,7 @@ class OrderSystem {
         this._dirtyKeys.clear();
         fetch('/api/data', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: this.getApiHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(payload)
         }).catch(() => { /* ignore transient errors */ });
     }
@@ -803,7 +884,7 @@ class OrderSystem {
     async refreshPendingFromServer() {
         if (!this.sharedBankActive) return;
         try {
-            const r = await fetch('/api/data');
+            const r = await fetch('/api/data', { headers: this.getApiHeaders() });
             if (!r.ok) return;
             const data = await r.json();
             if (Array.isArray(data.pendingOrders)) {
@@ -884,6 +965,20 @@ class OrderSystem {
         if (exportBackupBtn) exportBackupBtn.addEventListener('click', () => this.exportFullBackup());
         const saveServerBackupBtn = document.getElementById('save-server-backup-btn');
         if (saveServerBackupBtn) saveServerBackupBtn.addEventListener('click', () => this.saveServerBackup());
+        const restoreBackupBtn = document.getElementById('restore-backup-btn');
+        if (restoreBackupBtn) restoreBackupBtn.addEventListener('click', () => this.startRestoreBackup());
+        const restoreBackupInput = document.getElementById('restore-backup-input');
+        if (restoreBackupInput) restoreBackupInput.addEventListener('change', (e) => {
+            const f = e.target.files && e.target.files[0];
+            if (f) void this.handleRestoreBackup(f);
+        });
+        const saveBankApiKeyBtn = document.getElementById('save-bank-api-key-btn');
+        if (saveBankApiKeyBtn) saveBankApiKeyBtn.addEventListener('click', () => this.saveSecuritySettings());
+        const refreshStatusBtn = document.getElementById('refresh-system-status-btn');
+        if (refreshStatusBtn) refreshStatusBtn.addEventListener('click', () => void this.refreshSystemStatus());
+
+        const downloadIntakeTemplateBtn = document.getElementById('download-intake-template-btn');
+        if (downloadIntakeTemplateBtn) downloadIntakeTemplateBtn.addEventListener('click', () => this.downloadIntakeTemplate());
 
         // Inventory tab
         const inventorySupplierSelect = document.getElementById('inventory-supplier-select');
@@ -1034,6 +1129,9 @@ class OrderSystem {
         if (tabName === 'needs') this.renderNeeds();
         if (tabName === 'dashboard') this.renderDashboard();
         if (tabName === 'settings') {
+            this.loadSecuritySettings();
+            this.refreshSystemStatus();
+            this.renderSupplierEmailWarnings();
             this.refreshPriorityStatus();
             this.updateBackupCountsText();
         }
@@ -1294,6 +1392,7 @@ class OrderSystem {
             });
             if (prev) select.value = prev; // restore if the supplier still exists
         });
+        this.renderSupplierEmailWarnings();
     }
 
     loadSuppliersDisplay() {
@@ -2040,7 +2139,7 @@ class OrderSystem {
             const dataUrl = await this.compressImage(file, 800, 0.8);
             const r = await fetch('/api/identify', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: this.getApiHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ image: dataUrl })
             });
             const j = await r.json();
@@ -2453,7 +2552,7 @@ class OrderSystem {
         });
     }
 
-    addUser() {
+    async addUser() {
         const nameEl = document.getElementById('user-name-input');
         const passEl = document.getElementById('user-password-input');
         const roleEl = document.getElementById('user-role-input');
@@ -2464,7 +2563,8 @@ class OrderSystem {
         if (!name || !password) { alert('נא למלא שם וסיסמה'); return; }
         if (this.users.some(u => u.name === name)) { alert('כבר קיים משתמש עם השם הזה'); return; }
 
-        this.users.push({ id: 'u' + Date.now(), name, password, role });
+        const hashed = await hashPassword(password);
+        this.users.push({ id: 'u' + Date.now(), name, password: hashed, role });
         this.saveData('users', this.users);
         nameEl.value = ''; passEl.value = '';
         this.renderUsers();
@@ -2477,22 +2577,23 @@ class OrderSystem {
         if (!user) return;
         document.getElementById('edit-user-id').value = user.id;
         document.getElementById('edit-user-name').value = user.name;
-        document.getElementById('edit-user-password').value = user.password;
+        document.getElementById('edit-user-password').value = '';
+        document.getElementById('edit-user-password').placeholder = 'השאר ריק לשמירת הסיסמה הקיימת';
         document.getElementById('edit-user-role').value = user.role;
         document.getElementById('edit-user-modal').classList.add('active');
     }
 
-    saveUserEdit() {
+    async saveUserEdit() {
         const id = document.getElementById('edit-user-id').value;
         const user = this.users.find(u => u.id === id);
         if (!user) return;
         const name = document.getElementById('edit-user-name').value.trim();
         const password = document.getElementById('edit-user-password').value.trim();
-        if (!name || !password) { alert('נא למלא שם וסיסמה'); return; }
+        if (!name) { alert('נא למלא שם'); return; }
         if (this.users.some(u => u.id !== id && u.name === name)) { alert('כבר קיים משתמש אחר עם השם הזה'); return; }
 
         user.name = name;
-        user.password = password;
+        if (password) user.password = await hashPassword(password);
         user.role = document.getElementById('edit-user-role').value;
         this.saveData('users', this.users);
         this.closeUserEditModal();
@@ -3123,8 +3224,13 @@ class OrderSystem {
         const btn = document.getElementById('send-order-btn');
         if (!btn) return;
         const count = this.currentOrder.length + this.manualItems.length;
+        const isChef = this.isChefUser();
         btn.style.display = '';
-        btn.textContent = count > 0 ? `📤 שלח לאישור השף (${count})` : '📤 שלח לאישור השף';
+        if (count > 0) {
+            btn.textContent = isChef ? `📤 שלח לספק (${count})` : `📤 שלח לאישור השף (${count})`;
+        } else {
+            btn.textContent = isChef ? '📤 שלח לספק' : '📤 שלח לאישור השף';
+        }
     }
 
     // ===========================
@@ -4191,12 +4297,93 @@ class OrderSystem {
         return payload ? payload.text : '';
     }
 
-    // Everyone creates orders; all go to chef for approval before sending to supplier
+    // Everyone creates orders; chef can send directly to supplier
     submitOrder() {
-        this.submitForApproval();
+        if (this.isChefUser()) {
+            void this.submitAndSendDirectly();
+        } else {
+            this.submitForApproval();
+        }
     }
 
-    // Submit order for chef approval (all users, including chef)
+    async submitAndSendDirectly() {
+        const supplierId = document.getElementById('supplier-select').value;
+        const supplier = this.suppliers.find(s => s.id === supplierId);
+        const orderItems = this.getOrderItems();
+
+        if (!supplier || orderItems.length === 0) {
+            alert('נא לבחור ספק ולהוסיף מוצרים לסל');
+            return;
+        }
+
+        const sendMethod = this.preferences.sendMethod;
+        if ((sendMethod === 'email' || sendMethod === 'both') && this.isPlaceholderEmail(supplier.email)) {
+            alert(`לא ניתן לשלוח במייל — לספק "${supplier.name}" חסר מייל אמיתי. עדכן בטאב ספקים.`);
+            return;
+        }
+
+        if (!confirm(`לשלוח ישירות לספק "${supplier.name}"?`)) return;
+
+        const emailPayload = this.getCurrentOrderEmailPayload();
+        const message = emailPayload ? emailPayload.text : '';
+        const deliveryDate = document.getElementById('delivery-date').value;
+        const orderedBy = (typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.name)
+            ? authSystem.currentUser.name : '';
+
+        await this.dispatchOrder(supplier, message, sendMethod, this.approvalSettings.procurementEmail, emailPayload);
+
+        if (this.approvalSettings.prioritySendOnApprove) {
+            try {
+                const fakeOrder = {
+                    id: Date.now().toString(),
+                    date: new Date().toISOString(),
+                    supplierSnapshot: supplier,
+                    items: orderItems,
+                    deliveryDate,
+                    message
+                };
+                await this.pushOrderToPriority(fakeOrder, supplier);
+            } catch (e) {
+                this.showAlert(`נשלח לספק, אך Priority נכשל: ${e.message}`, 'info');
+            }
+        }
+
+        this.history.unshift({
+            id: Date.now().toString(),
+            date: new Date().toISOString(),
+            supplier: supplier.name,
+            items: orderItems,
+            message,
+            deliveryDate,
+            sendMethod,
+            showedPrices: this.preferences.showPrices,
+            createdByName: orderedBy,
+            approvedByName: orderedBy,
+            approved: true,
+            sentDirect: true
+        });
+        this.saveData('history', this.history);
+
+        const productIds = new Set();
+        orderItems.forEach(i => {
+            if (i.productId) productIds.add(i.productId);
+            else if (!i.manual) {
+                const p = this.products.find(x => x.name === i.product);
+                if (p) productIds.add(p.id);
+            }
+        });
+        if (productIds.size > 0) {
+            this.needs = this.needs.filter(n => !(n.supplierId === supplier.id && productIds.has(n.productId)));
+            this.saveData('needs', this.needs);
+            this.updateNeedsBadge();
+        }
+
+        this.clearOrder();
+        this.loadHistory();
+        this.showAlert('✅ ההזמנה נשלחה ישירות לספק', 'success');
+    }
+
+    // Submit order for chef approval (employees)
     submitForApproval() {
         const supplierId = document.getElementById('supplier-select').value;
         const supplier = this.suppliers.find(s => s.id === supplierId);
@@ -4297,6 +4484,12 @@ class OrderSystem {
         if (!confirm(`לאשר ולשלוח את ההזמנה לספק "${order.supplierSnapshot.name}"?`)) return;
 
         const supplier = order.supplierSnapshot;
+        const sendMethod = order.sendMethod || 'whatsapp';
+        if ((sendMethod === 'email' || sendMethod === 'both') && this.isPlaceholderEmail(supplier.email)) {
+            alert(`לא ניתן לשלוח במייל — לספק "${supplier.name}" חסר מייל אמיתי. עדכן בטאב ספקים.`);
+            return;
+        }
+
         const message = order.message;
         const procurementEmail = this.approvalSettings.procurementEmail;
 
@@ -4422,7 +4615,7 @@ class OrderSystem {
         try {
             const r = await fetch('/api/send-email', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: this.getApiHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({
                     to: email,
                     bcc: procurementEmail || undefined,
@@ -4477,7 +4670,7 @@ class OrderSystem {
         try {
             const r = await fetch('/api/send-email', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: this.getApiHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({
                     to,
                     subject: `בדיקת מייל — מערכת הזמנות ${dateStr}`,
@@ -4822,7 +5015,7 @@ class OrderSystem {
             .map(s => ({ name: s.name, orderDays: s.orderDays }));
         return fetch('/api/subscribe', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: this.getApiHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ subscription, schedule })
         }).then(r => r.json()).catch(() => null);
     }
@@ -4948,7 +5141,7 @@ class OrderSystem {
         const btn = document.getElementById('save-server-backup-btn');
         if (btn) { btn.disabled = true; btn.textContent = '⏳ שומר…'; }
         try {
-            const r = await fetch('/api/backup', { method: 'POST' });
+            const r = await fetch('/api/backup', { method: 'POST', headers: this.getApiHeaders() });
             const data = await r.json();
             if (!r.ok) throw new Error(data.error || 'שמירת גיבוי נכשלה');
             this.showAlert(`✅ גיבוי נשמר בשרת (${data.counts.products} מוצרים, ${data.counts.suppliers} ספקים)`, 'success');
@@ -4957,6 +5150,123 @@ class OrderSystem {
         } finally {
             if (btn) { btn.disabled = false; btn.textContent = '☁️ שמור גיבוי בשרת'; }
         }
+    }
+
+    startRestoreBackup() {
+        if (!this.isChefUser()) {
+            this.showAlert('רק השף יכול לשחזר גיבוי', 'info');
+            return;
+        }
+        const input = document.getElementById('restore-backup-input');
+        if (input) { input.value = ''; input.click(); }
+    }
+
+    async handleRestoreBackup(file) {
+        if (!file || !this.isChefUser()) return;
+        try {
+            const payload = JSON.parse(await file.text());
+            const data = payload.data || payload;
+            if (!data || (!data.suppliers && !data.products)) {
+                throw new Error('קובץ גיבוי לא תקין');
+            }
+            if (!confirm('שחזור ידרוס את כל הנתונים הנוכחיים במערכת. להמשיך?')) return;
+            if (!confirm('אישור סופי — פעולה זו בלתי הפיכה. לשחזר?')) return;
+
+            const apply = (key, val) => {
+                if (val === undefined || val === null) return;
+                if (SHARED_KEYS.includes(key) && Array.isArray(val)) {
+                    this[key] = val;
+                    this.saveData(key, val);
+                } else if (key === 'approvalSettings' && typeof val === 'object') {
+                    this.approvalSettings = { ...this.approvalSettings, ...val };
+                    this.saveData('approvalSettings', this.approvalSettings);
+                } else if (key === 'preferences' && typeof val === 'object') {
+                    this.preferences = { ...this.preferences, ...val };
+                    localStorage.setItem('preferences', JSON.stringify(this.preferences));
+                }
+            };
+
+            apply('suppliers', data.suppliers);
+            apply('products', data.products);
+            apply('history', data.history);
+            apply('pendingOrders', data.pendingOrders);
+            apply('staff', data.staff);
+            apply('users', data.users);
+            apply('needs', data.needs);
+            apply('approvalSettings', data.approvalSettings);
+            apply('preferences', data.preferences);
+
+            this.ensureGeneralWarehouseSupplier();
+            this.rerenderAll();
+            this.showAlert('✅ הגיבוי שוחזר בהצלחה', 'success');
+        } catch (e) {
+            this.showAlert('שחזור נכשל: ' + e.message, 'info');
+        }
+    }
+
+    downloadIntakeTemplate() {
+        if (typeof XLSX === 'undefined') {
+            alert('ספריית אקסל לא נטענה — רענן את הדף');
+            return;
+        }
+        const ws = XLSX.utils.aoa_to_sheet([
+            ['מק״ט', 'שם מוצר', 'כמות', 'יחידה', 'ספק'],
+            ['12345', 'עגבניות', 10, 'ק״ג', 'ירקות ופירות'],
+            ['', 'חסה', 5, 'יחידה', ''],
+        ]);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'קליטה');
+        XLSX.writeFile(wb, 'תבנית-קליטת-מלאי.xlsx');
+    }
+
+    loadSecuritySettings() {
+        const input = document.getElementById('bank-api-key-input');
+        if (input) input.value = this.getBankApiKey();
+    }
+
+    saveSecuritySettings() {
+        if (!this.isChefUser()) return;
+        const input = document.getElementById('bank-api-key-input');
+        this.saveBankApiKey(input ? input.value : '');
+        this.showAlert('✅ מפתח API נשמר במכשיר זה', 'success');
+        void this.initSharedBank();
+        void this.refreshSystemStatus();
+    }
+
+    async refreshSystemStatus() {
+        const el = document.getElementById('system-status-text');
+        if (!el) return;
+        el.innerHTML = 'בודק…';
+        const parts = [];
+        try {
+            const r = await fetch('/api/data', { headers: this.getApiHeaders() });
+            if (r.ok) parts.push('✅ סנכרון KV — פעיל');
+            else if (r.status === 401) parts.push('🔒 סנכרון KV — נדרש מפתח API (הגדר ב-Vercel + בהגדרות)');
+            else if (r.status === 503) parts.push('⚠️ סנכרון KV — לא מוגדר ב-Vercel');
+            else parts.push('❌ סנכרון KV — שגיאה ' + r.status);
+        } catch {
+            parts.push('❌ סנכרון KV — לא זמין');
+        }
+        try {
+            const r = await fetch('/api/send-email', { headers: this.getApiHeaders() });
+            const j = await r.json().catch(() => ({}));
+            if (r.ok && j.configured) parts.push(`✅ מייל — ${j.provider}`);
+            else if (r.ok) parts.push('⚠️ מייל — לא מוגדר (SMTP / Resend)');
+            else if (r.status === 401) parts.push('🔒 מייל — נדרש מפתח API');
+            else parts.push('❌ מייל — לא זמין');
+        } catch {
+            parts.push('❌ מייל — לא זמין');
+        }
+        const missing = this.getSuppliersMissingEmail();
+        if (missing.length) {
+            parts.push(`⚠️ ${missing.length} ספקים ללא מייל אמיתי`);
+        } else {
+            parts.push('✅ מיילים לספקים — תקין');
+        }
+        if (this.sharedBankAuthFailed) {
+            parts.push('🔒 הזן מפתח API תחת אבטחה ולחץ שמור');
+        }
+        el.innerHTML = parts.join('<br>');
     }
 
     // ===========================
@@ -4992,7 +5302,7 @@ class OrderSystem {
         const dataUrl = await this.compressImage(file, 1200, 0.85);
         const r = await fetch('/api/parse-receipt', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: this.getApiHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ image: dataUrl })
         });
         const j = await r.json();
@@ -5173,6 +5483,19 @@ class OrderSystem {
         document.getElementById('intake-modal').classList.add('active');
     }
 
+    refreshIntakeLine(idx) {
+        if (!this._intakeDraft || !this._intakeDraft.lines[idx]) return;
+        const line = this._intakeDraft.lines[idx];
+        const target = this.resolveIntakeTarget(this._intakeDraft.supplierId);
+        const isOnce = target.mode === 'once';
+        const matchScope = isOnce ? null : (target.supplierId || '');
+        const product = this.findProductForIntake(line, matchScope);
+        line.productId = product ? product.id : '';
+        let status = product ? 'matched' : 'new';
+        if (isOnce && !product) status = 'skip';
+        line.status = status;
+    }
+
     renderIntakePreview() {
         const container = document.getElementById('intake-lines');
         const summary = document.getElementById('intake-summary');
@@ -5199,12 +5522,25 @@ class OrderSystem {
             </div>
         ` + this._intakeDraft.lines.map((l, i) => `
             <div class="intake-row ${rowClass(l)}">
-                <span>${this.escapeHtml(l.name)}</span>
-                <span class="intake-sku">${this.escapeHtml(l.sku || '—')}</span>
+                <input type="text" class="input-field intake-name-input" data-idx="${i}" value="${this.escapeHtml(l.name)}" style="margin:0;padding:6px;">
+                <input type="text" class="input-field intake-sku-input" data-idx="${i}" value="${this.escapeHtml(l.sku || '')}" placeholder="מק״ט" style="margin:0;padding:6px;font-family:monospace;">
                 <input type="number" class="input-field intake-qty-input" data-idx="${i}" min="0" step="0.5" value="${l.quantity}" style="margin:0;padding:6px;">
                 <span class="intake-status">${statusLabel(l)}</span>
             </div>
         `).join('');
+        container.querySelectorAll('.intake-name-input, .intake-sku-input').forEach(inp => {
+            inp.addEventListener('change', () => {
+                const idx = parseInt(inp.dataset.idx, 10);
+                if (!this._intakeDraft.lines[idx]) return;
+                if (inp.classList.contains('intake-name-input')) {
+                    this._intakeDraft.lines[idx].name = inp.value.trim();
+                } else {
+                    this._intakeDraft.lines[idx].sku = inp.value.trim();
+                }
+                this.refreshIntakeLine(idx);
+                this.renderIntakePreview();
+            });
+        });
         if (summary) {
             if (isOnce) {
                 summary.textContent = `${matched} פריטים קיימים יתווספו למלאי · ${skipped} לא יקלטו (חד-פעמי — רק פריטים שכבר בבנק)`;
@@ -5233,6 +5569,14 @@ class OrderSystem {
             if (this._intakeDraft.lines[idx]) {
                 this._intakeDraft.lines[idx].quantity = Math.max(0, parseFloat(inp.value) || 0);
             }
+        });
+        document.querySelectorAll('.intake-name-input').forEach(inp => {
+            const idx = parseInt(inp.dataset.idx, 10);
+            if (this._intakeDraft.lines[idx]) this._intakeDraft.lines[idx].name = inp.value.trim();
+        });
+        document.querySelectorAll('.intake-sku-input').forEach(inp => {
+            const idx = parseInt(inp.dataset.idx, 10);
+            if (this._intakeDraft.lines[idx]) this._intakeDraft.lines[idx].sku = inp.value.trim();
         });
 
         let stockUpdated = 0;
@@ -5541,7 +5885,7 @@ class OrderSystem {
         if (!el) return;
         el.textContent = 'בודק חיבור…';
         try {
-            const r = await fetch('/api/priority/status');
+            const r = await fetch('/api/priority/status', { headers: this.getApiHeaders() });
             const data = await r.json();
             if (!data.configured) {
                 el.textContent = '⚠️ Priority לא מוגדר בשרת — הוסף משתני סביבה ב-Vercel';
@@ -5631,7 +5975,7 @@ class OrderSystem {
         const btn = document.getElementById('priority-sync-btn');
         if (btn) { btn.disabled = true; btn.textContent = '⏳ מסנכרן…'; }
         try {
-            const r = await fetch('/api/priority/sync', { method: 'POST' });
+            const r = await fetch('/api/priority/sync', { method: 'POST', headers: this.getApiHeaders() });
             const data = await r.json();
             if (!r.ok) throw new Error(data.error || data.hint || 'סנכרון נכשל');
 
@@ -5666,7 +6010,7 @@ class OrderSystem {
         const enrichedItems = (order.items || []).map(it => this.enrichOrderItem(it));
         const r = await fetch('/api/priority/create-order', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: this.getApiHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({
                 supplier,
                 deliveryDate: order.deliveryDate,

@@ -180,6 +180,7 @@
 
                 <button id="scan-stock-btn" class="btn btn-primary" style="background:linear-gradient(135deg,#5C6BC0,#3949AB);">📷 סרוק מוצר לקליטת מלאי (ברקוד / זיהוי בתמונה)</button>
                 <button id="intake-document-btn" class="btn btn-primary" style="background:linear-gradient(135deg,#00897B,#00695C);margin-top:8px;">📄 קליטת מלאי מקבלה / הזמנה (סריקה או אקסל)</button>
+                <button id="download-intake-template-btn" class="btn btn-secondary" style="margin-top:8px;">📥 הורד תבנית אקסל לקליטה</button>
                 <input type="file" id="intake-document-input" accept="image/*,.xlsx,.xls,.csv" hidden>
 
                 <label for="inventory-supplier-select">בחר ספק:</label>
@@ -403,6 +404,20 @@
 
                 <hr style="margin: 30px 0;">
 
+                <!-- Security & system status -->
+                <div class="settings-section">
+                    <h3>🔒 אבטחה וסטטוס מערכת</h3>
+                    <p class="help-text">הגדר <code>BANK_API_KEY</code> ב-Vercel, ואז הזן את אותו מפתח כאן (נשמר במכשיר זה בלבד).</p>
+                    <label for="bank-api-key-input">מפתח API לשרת:</label>
+                    <input type="password" id="bank-api-key-input" class="input-field" placeholder="הדבק את BANK_API_KEY מ-Vercel" autocomplete="off">
+                    <button type="button" id="save-bank-api-key-btn" class="btn btn-primary">💾 שמור מפתח API</button>
+                    <button type="button" id="refresh-system-status-btn" class="btn btn-secondary" style="margin-right:8px;">🔄 רענן סטטוס</button>
+                    <p id="system-status-text" class="help-text" style="margin-top:12px;font-weight:600;line-height:1.6;"></p>
+                    <p id="supplier-email-warnings" class="help-text" style="margin-top:8px;"></p>
+                </div>
+
+                <hr style="margin: 30px 0;">
+
                 <!-- Priority ERP -->
                 <div class="settings-section">
                     <h3>🔗 Priority (פיוריטי)</h3>
@@ -431,6 +446,9 @@
                     <p id="backup-counts-text" class="help-text" style="font-weight:600;"></p>
                     <button type="button" id="export-full-backup-btn" class="btn btn-primary">💾 הורד גיבוי מלא (JSON)</button>
                     <button type="button" id="save-server-backup-btn" class="btn btn-secondary" style="margin-right:8px;">☁️ שמור גיבוי בשרת</button>
+                    <button type="button" id="restore-backup-btn" class="btn btn-secondary" style="margin-right:8px;background:#E65100;color:#fff;">♻️ שחזר מגיבוי</button>
+                    <input type="file" id="restore-backup-input" accept=".json,application/json" hidden>
+                    <p class="help-text" style="margin-top:8px;">שחזור מחליף את כל הנתונים — מומלץ להוריד גיבוי לפני.</p>
                 </div>
 
                 <hr style="margin: 30px 0;">

@@ -2,8 +2,10 @@
 // Stores a browser's push subscription + its per-supplier order-day schedule.
 const kv = require('../kvclient');
 const crypto = require('crypto');
+const { checkApiKey } = require('./auth');
 
 module.exports = async (req, res) => {
+    if (!checkApiKey(req, res)) return;
     if (req.method !== 'POST') {
         res.status(405).json({ error: 'method not allowed' });
         return;
