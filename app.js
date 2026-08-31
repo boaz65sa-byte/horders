@@ -5210,9 +5210,9 @@ class OrderSystem {
             return;
         }
         const ws = XLSX.utils.aoa_to_sheet([
-            ['מק״ט', 'שם מוצר', 'כמות', 'יחידה', 'ספק'],
-            ['12345', 'עגבניות', 10, 'ק״ג', 'ירקות ופירות'],
-            ['', 'חסה', 5, 'יחידה', ''],
+            ['מק״ט', 'שם מוצר', 'כמות', 'יחידה', 'מחיר', 'ספק'],
+            ['12345', 'עגבניות', 10, 'ק״ג', 8.5, 'ירקות ופירות'],
+            ['', 'חסה', 5, 'יחידה', 6, ''],
         ]);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'קליטה');
@@ -5338,13 +5338,14 @@ class OrderSystem {
     }
 
     rowsToIntakePayload(rows) {
-        const colMap = { sku: -1, name: -1, qty: -1, unit: -1, supplier: -1 };
+        const colMap = { sku: -1, name: -1, qty: -1, unit: -1, supplier: -1, price: -1 };
         const patterns = {
             sku: ['מקט', 'מק״ט', 'sku', 'קוד', 'ברקוד', 'part', 'partname'],
             name: ['שם', 'פריט', 'מוצר', 'תיאור', 'שם פריט', 'שם מוצר'],
             qty: ['כמות', 'qty', 'quantity', 'כמות שהתקבלה', 'כמות קיימת', 'כמות להזמנה'],
             unit: ['יחידה', 'unit', 'יח'],
-            supplier: ['ספק', 'supplier', 'שם ספק']
+            supplier: ['ספק', 'supplier', 'שם ספק'],
+            price: ['מחיר', 'price', 'עלות', 'סכום']
         };
         let headerRow = -1;
         for (let r = 0; r < Math.min(rows.length, 8); r++) {
@@ -5371,8 +5372,12 @@ class OrderSystem {
             const sku = colMap.sku >= 0 ? String(row[colMap.sku] || '').trim() : '';
             const unit = colMap.unit >= 0 ? String(row[colMap.unit] || 'יחידה').trim() : 'יחידה';
             const sup = colMap.supplier >= 0 ? String(row[colMap.supplier] || '').trim() : '';
+            const price = colMap.price >= 0 ? (parseFloat(row[colMap.price]) || 0) : 0;
             if (sup && !supplierName) supplierName = sup;
-            items.push({ sku, name, quantity: qty, unit: unit || 'יחידה' });
+            items.push({
+                sku, name, quantity: qty, unit: unit || 'יחידה',
+                supplierName: sup, price
+            });
         }
         if (!items.length) throw new Error('לא נמצאו שורות מוצרים בקובץ');
         return { supplierName, documentType: 'spreadsheet', items };
@@ -5394,6 +5399,33 @@ class OrderSystem {
             s.name.toLowerCase().includes(low) ||
             low.includes(s.name.toLowerCase())
         ) || null;
+    }
+
+    resolveLineSupplierId(line, defaultSupplierId) {
+        if (line.supplierId) return line.supplierId;
+        if (line.supplierName) {
+            const s = this.resolveIntakeSupplier(line.supplierName);
+            if (s && s.id !== '__warehouse_general_once__') return s.id;
+        }
+        const target = this.resolveIntakeTarget(defaultSupplierId || '');
+        if (target.mode === 'general') return '__warehouse_general__';
+        if (target.mode === 'once') return '';
+        return target.supplierId || '';
+    }
+
+    buildIntakeLineSupplierOptions(selectedId) {
+        return '<option value="">ברירת מחדל</option>' +
+            this.suppliers.map(s =>
+                `<option value="${s.id}"${s.id === selectedId ? ' selected' : ''}>${this.escapeHtml(s.name)}</option>`
+            ).join('');
+    }
+
+    buildIntakeUnitOptions(selectedUnit) {
+        const units = ['יחידה', 'ק״ג', 'ארגז', 'קרטון', 'ליטר', 'גרם'];
+        const u = selectedUnit || 'יחידה';
+        return units.map(x =>
+            `<option value="${x}"${x === u ? ' selected' : ''}>${x}</option>`
+        ).join('');
     }
 
     findProductForIntake(line, supplierId) {
@@ -5427,19 +5459,27 @@ class OrderSystem {
         }
         const target = this.resolveIntakeTarget(supplierId);
         const isOnce = target.mode === 'once';
-        const matchScope = isOnce ? null : (target.supplierId || '');
 
         return (parsed.items || []).map((line) => {
-            const product = this.findProductForIntake(line, matchScope);
+            const lineSupplierId = this.resolveLineSupplierId(line, supplierId);
+            const addToCatalog = line.addToCatalog !== undefined ? line.addToCatalog : !isOnce;
+            const forceNew = !!line.forceNew;
+            const matchScope = (isOnce && !addToCatalog) ? null : (lineSupplierId || null);
+            const product = forceNew ? null : this.findProductForIntake(line, matchScope);
             let status = product ? 'matched' : 'new';
-            if (isOnce && !product) status = 'skip';
+            if (isOnce && !product && !addToCatalog) status = 'skip';
             return {
                 sku: line.sku || '',
                 name: line.name,
                 quantity: line.quantity,
                 unit: line.unit || 'יחידה',
+                price: Math.max(0, Number(line.price) || 0),
+                supplierName: line.supplierName || '',
+                supplierId: lineSupplierId,
                 productId: product ? product.id : '',
-                status
+                status,
+                forceNew,
+                addToCatalog
             };
         });
     }
@@ -5472,7 +5512,9 @@ class OrderSystem {
                 this._intakeDraft.lines = this.prepareIntakeLines({
                     supplierName: '',
                     items: this._intakeDraft.lines.map(l => ({
-                        sku: l.sku, name: l.name, quantity: l.quantity, unit: l.unit
+                        sku: l.sku, name: l.name, quantity: l.quantity, unit: l.unit,
+                        supplierName: l.supplierName, supplierId: l.supplierId,
+                        price: l.price, forceNew: l.forceNew, addToCatalog: l.addToCatalog
                     }))
                 }, sel.value);
                 this.renderIntakePreview();
@@ -5486,84 +5528,16 @@ class OrderSystem {
     refreshIntakeLine(idx) {
         if (!this._intakeDraft || !this._intakeDraft.lines[idx]) return;
         const line = this._intakeDraft.lines[idx];
-        const target = this.resolveIntakeTarget(this._intakeDraft.supplierId);
-        const isOnce = target.mode === 'once';
-        const matchScope = isOnce ? null : (target.supplierId || '');
-        const product = this.findProductForIntake(line, matchScope);
+        const isOnce = this.isIntakeOnceMode(this._intakeDraft.supplierId);
+        const matchScope = (isOnce && !line.addToCatalog) ? null : (line.supplierId || null);
+        const product = line.forceNew ? null : this.findProductForIntake(line, matchScope);
         line.productId = product ? product.id : '';
         let status = product ? 'matched' : 'new';
-        if (isOnce && !product) status = 'skip';
+        if (isOnce && !product && !line.addToCatalog) status = 'skip';
         line.status = status;
     }
 
-    renderIntakePreview() {
-        const container = document.getElementById('intake-lines');
-        const summary = document.getElementById('intake-summary');
-        if (!container || !this._intakeDraft) return;
-        const isOnce = this.isIntakeOnceMode(this._intakeDraft.supplierId);
-        const isGeneral = this._intakeDraft.supplierId === '__warehouse_general__';
-        const matched = this._intakeDraft.lines.filter(l => l.status === 'matched').length;
-        const fresh = this._intakeDraft.lines.filter(l => l.status === 'new').length;
-        const skipped = this._intakeDraft.lines.filter(l => l.status === 'skip').length;
-        const statusLabel = (l) => {
-            if (l.status === 'matched') return '✅ קיים';
-            if (l.status === 'skip') return '⏭️ לא יקלט';
-            if (isGeneral) return '🆕 חדש במחסן כללי';
-            return '🆕 חדש';
-        };
-        const rowClass = (l) => {
-            if (l.status === 'skip') return 'intake-miss';
-            if (l.status === 'new') return 'intake-new';
-            return '';
-        };
-        container.innerHTML = `
-            <div class="intake-row intake-row-head">
-                <span>פריט</span><span>מק״ט</span><span>כמות</span><span>סטטוס</span>
-            </div>
-        ` + this._intakeDraft.lines.map((l, i) => `
-            <div class="intake-row ${rowClass(l)}">
-                <input type="text" class="input-field intake-name-input" data-idx="${i}" value="${this.escapeHtml(l.name)}" style="margin:0;padding:6px;">
-                <input type="text" class="input-field intake-sku-input" data-idx="${i}" value="${this.escapeHtml(l.sku || '')}" placeholder="מק״ט" style="margin:0;padding:6px;font-family:monospace;">
-                <input type="number" class="input-field intake-qty-input" data-idx="${i}" min="0" step="0.5" value="${l.quantity}" style="margin:0;padding:6px;">
-                <span class="intake-status">${statusLabel(l)}</span>
-            </div>
-        `).join('');
-        container.querySelectorAll('.intake-name-input, .intake-sku-input').forEach(inp => {
-            inp.addEventListener('change', () => {
-                const idx = parseInt(inp.dataset.idx, 10);
-                if (!this._intakeDraft.lines[idx]) return;
-                if (inp.classList.contains('intake-name-input')) {
-                    this._intakeDraft.lines[idx].name = inp.value.trim();
-                } else {
-                    this._intakeDraft.lines[idx].sku = inp.value.trim();
-                }
-                this.refreshIntakeLine(idx);
-                this.renderIntakePreview();
-            });
-        });
-        if (summary) {
-            if (isOnce) {
-                summary.textContent = `${matched} פריטים קיימים יתווספו למלאי · ${skipped} לא יקלטו (חד-פעמי — רק פריטים שכבר בבנק)`;
-            } else if (isGeneral) {
-                summary.textContent = `${matched} פריטים קיימים יתווספו למלאי · ${fresh} פריטים חדשים ייווצרו במחסן הכללי`;
-            } else {
-                summary.textContent = `${matched} פריטים קיימים יתווספו למלאי · ${fresh} פריטים חדשים ייווצרו בבנק`;
-            }
-        }
-    }
-
-    confirmIntake() {
-        if (!this._intakeDraft) return;
-        const rawSupplierId = document.getElementById('intake-supplier-select')?.value || this._intakeDraft.supplierId;
-        if (!rawSupplierId) {
-            alert('נא לבחור ספק או מחסן לפני קליטה');
-            return;
-        }
-        const target = this.resolveIntakeTarget(rawSupplierId);
-        const isOnce = target.mode === 'once';
-        const supplierId = target.supplierId;
-        if (target.mode === 'supplier' && !this.suppliers.find(s => s.id === supplierId)) return;
-
+    collectIntakeFormValues() {
         document.querySelectorAll('.intake-qty-input').forEach(inp => {
             const idx = parseInt(inp.dataset.idx, 10);
             if (this._intakeDraft.lines[idx]) {
@@ -5578,29 +5552,159 @@ class OrderSystem {
             const idx = parseInt(inp.dataset.idx, 10);
             if (this._intakeDraft.lines[idx]) this._intakeDraft.lines[idx].sku = inp.value.trim();
         });
+        document.querySelectorAll('.intake-price-input').forEach(inp => {
+            const idx = parseInt(inp.dataset.idx, 10);
+            if (this._intakeDraft.lines[idx]) {
+                this._intakeDraft.lines[idx].price = Math.max(0, parseFloat(inp.value) || 0);
+            }
+        });
+        document.querySelectorAll('.intake-unit-input').forEach(inp => {
+            const idx = parseInt(inp.dataset.idx, 10);
+            if (this._intakeDraft.lines[idx]) this._intakeDraft.lines[idx].unit = inp.value;
+        });
+        document.querySelectorAll('.intake-supplier-input').forEach(inp => {
+            const idx = parseInt(inp.dataset.idx, 10);
+            if (!this._intakeDraft.lines[idx]) return;
+            const val = inp.value;
+            this._intakeDraft.lines[idx].supplierId = val;
+            this._intakeDraft.lines[idx].supplierName = val
+                ? (this.suppliers.find(s => s.id === val)?.name || '')
+                : '';
+        });
+        document.querySelectorAll('.intake-force-new').forEach(inp => {
+            const idx = parseInt(inp.dataset.idx, 10);
+            if (this._intakeDraft.lines[idx]) {
+                this._intakeDraft.lines[idx].forceNew = inp.checked;
+            }
+        });
+        document.querySelectorAll('.intake-add-catalog').forEach(inp => {
+            const idx = parseInt(inp.dataset.idx, 10);
+            if (this._intakeDraft.lines[idx]) {
+                this._intakeDraft.lines[idx].addToCatalog = inp.checked;
+            }
+        });
+    }
 
+    renderIntakePreview() {
+        const container = document.getElementById('intake-lines');
+        const summary = document.getElementById('intake-summary');
+        if (!container || !this._intakeDraft) return;
+        const isOnce = this.isIntakeOnceMode(this._intakeDraft.supplierId);
+        const isGeneral = this._intakeDraft.supplierId === '__warehouse_general__';
+        const matched = this._intakeDraft.lines.filter(l => l.status === 'matched').length;
+        const fresh = this._intakeDraft.lines.filter(l => l.status === 'new').length;
+        const skipped = this._intakeDraft.lines.filter(l => l.status === 'skip').length;
+        const statusLabel = (l) => {
+            if (l.status === 'matched') return '✅ בבנק';
+            if (l.status === 'skip') return '⏭️ מלאי בלבד';
+            if (isGeneral) return '🆕 חדש בבנק';
+            return '🆕 חדש בבנק';
+        };
+        const rowClass = (l) => {
+            if (l.status === 'skip') return 'intake-miss';
+            if (l.status === 'new') return 'intake-new';
+            return '';
+        };
+        const supplierName = (l) => {
+            if (l.supplierId) {
+                return this.suppliers.find(s => s.id === l.supplierId)?.name || '';
+            }
+            const def = this.suppliers.find(s => s.id === this._intakeDraft.supplierId);
+            return def ? def.name + ' (ברירת מחדל)' : '';
+        };
+        container.innerHTML = `
+            <div class="intake-row intake-row-head">
+                <span>שם פריט</span><span>מק״ט</span><span>כמות</span><span>יחידה</span><span>מחיר</span><span>ספק</span><span>סטטוס</span>
+            </div>
+        ` + this._intakeDraft.lines.map((l, i) => `
+            <div class="intake-row ${rowClass(l)}">
+                <input type="text" class="input-field intake-name-input" data-idx="${i}" value="${this.escapeHtml(l.name)}" style="margin:0;padding:6px;">
+                <input type="text" class="input-field intake-sku-input" data-idx="${i}" value="${this.escapeHtml(l.sku || '')}" placeholder="מק״ט" style="margin:0;padding:6px;font-family:monospace;">
+                <input type="number" class="input-field intake-qty-input" data-idx="${i}" min="0" step="0.5" value="${l.quantity}" style="margin:0;padding:6px;">
+                <select class="input-field intake-unit-input" data-idx="${i}" style="margin:0;padding:6px;">${this.buildIntakeUnitOptions(l.unit)}</select>
+                <input type="number" class="input-field intake-price-input" data-idx="${i}" min="0" step="0.01" value="${l.price || 0}" style="margin:0;padding:6px;">
+                <select class="input-field intake-supplier-input" data-idx="${i}" style="margin:0;padding:6px;">${this.buildIntakeLineSupplierOptions(l.supplierId)}</select>
+                <span class="intake-status" title="${this.escapeHtml(supplierName(l))}">${statusLabel(l)}</span>
+            </div>
+            <div class="intake-row-actions">
+                ${l.status === 'matched' ? `<label><input type="checkbox" class="intake-force-new" data-idx="${i}" ${l.forceNew ? 'checked' : ''}> פריט חדש (לא לקשר לקיים)</label>` : ''}
+                ${l.status === 'skip' ? `<label><input type="checkbox" class="intake-add-catalog" data-idx="${i}" ${l.addToCatalog ? 'checked' : ''}> הוסף גם לבנק המוצרים</label>` : ''}
+            </div>
+        `).join('');
+
+        const rerender = (idx) => {
+            this.collectIntakeFormValues();
+            if (idx !== undefined) this.refreshIntakeLine(idx);
+            this.renderIntakePreview();
+        };
+
+        container.querySelectorAll('.intake-name-input, .intake-sku-input').forEach(inp => {
+            inp.addEventListener('change', () => rerender(parseInt(inp.dataset.idx, 10)));
+        });
+        container.querySelectorAll('.intake-force-new, .intake-add-catalog').forEach(inp => {
+            inp.addEventListener('change', () => rerender(parseInt(inp.dataset.idx, 10)));
+        });
+        container.querySelectorAll('.intake-supplier-input').forEach(inp => {
+            inp.addEventListener('change', () => rerender(parseInt(inp.dataset.idx, 10)));
+        });
+
+        if (summary) {
+            const catalogNew = fresh + (isOnce ? this._intakeDraft.lines.filter(l => l.status === 'skip' && l.addToCatalog).length : 0);
+            if (isOnce) {
+                summary.textContent = `${matched} פריטים קיימים → מלאי + בנק · ${catalogNew} חדשים לבנק · ${skipped} מלאי בלבד (סמן "הוסף לבנק" לשנות)`;
+            } else {
+                summary.textContent = `${matched} פריטים קיימים → עדכון מלאי · ${fresh} פריטים חדשים → מלאי + בנק המוצרים (לפי ספק)`;
+            }
+        }
+    }
+
+    confirmIntake() {
+        if (!this._intakeDraft) return;
+        const rawSupplierId = document.getElementById('intake-supplier-select')?.value || this._intakeDraft.supplierId;
+        if (!rawSupplierId) {
+            alert('נא לבחור ספק ברירת מחדל לפני קליטה');
+            return;
+        }
+        this.collectIntakeFormValues();
+
+        const isOnce = this.isIntakeOnceMode(rawSupplierId);
         let stockUpdated = 0;
         let created = 0;
+        let updated = 0;
         let skipped = 0;
-        this._intakeDraft.lines.forEach((line) => {
-            if (line.quantity <= 0) return;
-            if (isOnce && line.status === 'skip') {
-                skipped++;
+        let firstCatalogSupplierId = '';
+
+        for (const line of this._intakeDraft.lines) {
+            if (line.quantity <= 0) continue;
+
+            const lineSupplierId = line.supplierId || this.resolveLineSupplierId(line, rawSupplierId);
+            if (!lineSupplierId && !(isOnce && line.status === 'skip' && !line.addToCatalog)) {
+                alert(`לפריט "${line.name}" חסר ספק — בחר ספק בשורה או ברירת מחדל`);
                 return;
             }
-            let product = line.productId ? this.products.find(p => p.id === line.productId) : null;
-            if (!product) product = this.findProductForIntake(line, isOnce ? null : supplierId);
+
+            if (isOnce && line.status === 'skip' && !line.addToCatalog) {
+                skipped++;
+                continue;
+            }
+
+            let product = (!line.forceNew && line.productId)
+                ? this.products.find(p => p.id === line.productId)
+                : null;
+            if (!product && !line.forceNew) {
+                product = this.findProductForIntake(line, lineSupplierId || null);
+            }
 
             if (!product) {
-                if (isOnce) {
+                if (!lineSupplierId) {
                     skipped++;
-                    return;
+                    continue;
                 }
                 product = {
                     id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
-                    supplierId,
+                    supplierId: lineSupplierId,
                     name: line.name,
-                    price: 0,
+                    price: line.price || 0,
                     unit: line.unit || 'יחידה',
                     image: '',
                     sku: line.sku || '',
@@ -5610,27 +5714,49 @@ class OrderSystem {
                 };
                 this.products.push(product);
                 created++;
+                if (!firstCatalogSupplierId) firstCatalogSupplierId = lineSupplierId;
+            } else {
+                if (line.name && line.name !== product.name) product.name = line.name;
+                if (line.sku) { product.sku = line.sku; product.priorityPartName = line.sku; }
+                if (line.unit) product.unit = line.unit;
+                if (line.price > 0) product.price = line.price;
+                updated++;
             }
 
             this.addBatchToProduct(product, line.quantity, '');
             stockUpdated++;
-        });
+        }
+
+        if (stockUpdated === 0 && skipped > 0) {
+            alert('לא נקלטו פריטים — בדוק ספק, כמויות, או סמן "הוסף לבנק"');
+            return;
+        }
 
         this.saveData('products', this.products);
         this.closeIntakeModal();
         this.loadSupplierSelects();
         this.renderAllProducts();
         this.renderDashboard();
+        this.renderRecentlyAdded();
+
+        const viewSupplierId = firstCatalogSupplierId || this.resolveLineSupplierId({}, rawSupplierId);
+        if (viewSupplierId) {
+            this.switchTab('products');
+            const prodSel = document.getElementById('product-supplier-select');
+            if (prodSel) prodSel.value = viewSupplierId;
+            this.renderAllProducts();
+        }
 
         const invSel = document.getElementById('inventory-supplier-select');
-        if (invSel && supplierId) {
-            invSel.value = supplierId;
-            this.renderInventory(supplierId);
+        if (invSel && viewSupplierId) {
+            invSel.value = viewSupplierId;
+            this.renderInventory(viewSupplierId);
             document.getElementById('inventory-controls').style.display = 'block';
         }
 
-        let msg = `📥 קליטה הושלמה: ${stockUpdated} פריטים למלאי`;
-        if (created) msg += ` (${created} חדשים בבנק)`;
+        let msg = `📥 קליטה הושלמה: ${stockUpdated} למלאי`;
+        if (created) msg += ` · ${created} חדשים בבנק המוצרים`;
+        if (updated) msg += ` · ${updated} עודכנו בבנק`;
         if (skipped) msg += ` · ${skipped} דולגו`;
         this.showAlert(msg, 'success');
     }

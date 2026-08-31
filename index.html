@@ -179,7 +179,7 @@
                 <p class="help-text">עדכן "כמות קיים" במלאי → "כמות להזמנה" (החוסר) מחושבת אוטומטית. "מלאי פתיחה" (כמה צריך להיות) נערך ע"י השף/מנהל בלבד.</p>
 
                 <button id="scan-stock-btn" class="btn btn-primary" style="background:linear-gradient(135deg,#5C6BC0,#3949AB);">📷 סרוק מוצר לקליטת מלאי (ברקוד / זיהוי בתמונה)</button>
-                <button id="intake-document-btn" class="btn btn-primary" style="background:linear-gradient(135deg,#00897B,#00695C);margin-top:8px;">📄 קליטת מלאי מקבלה / הזמנה (סריקה או אקסל)</button>
+                <button id="intake-document-btn" class="btn btn-primary" style="background:linear-gradient(135deg,#00897B,#00695C);margin-top:8px;">📄 קליטת קבלה / חשבונית (מלאי + בנק מוצרים)</button>
                 <button id="download-intake-template-btn" class="btn btn-secondary" style="margin-top:8px;">📥 הורד תבנית אקסל לקליטה</button>
                 <input type="file" id="intake-document-input" accept="image/*,.xlsx,.xls,.csv" hidden>
 
@@ -582,18 +582,18 @@
         </div>
     </div>
 
-    <!-- Document Intake Modal (receipt / order → stock) -->
+    <!-- Document Intake Modal (receipt / order → stock + product bank) -->
     <div id="intake-modal" class="modal">
-        <div class="modal-content" style="max-width:720px;">
-            <h2>📄 קליטת מלאי ממסמך</h2>
+        <div class="modal-content intake-modal-content">
+            <h2>📄 קליטת קבלה / חשבונית</h2>
             <p class="help-text" id="intake-doc-info"></p>
-            <label for="intake-supplier-select">ספק / מחסן:</label>
+            <label for="intake-supplier-select">ספק ברירת מחדל (לכל השורות):</label>
             <select id="intake-supplier-select" class="input-field"></select>
-            <p class="help-text">🏭 <strong>מחסן כללי</strong> — פריטים חדשים נשמרים במחסן הכללי · 📦 <strong>חד-פעמי</strong> — רק עדכון מלאי לפריטים שכבר קיימים בבנק</p>
+            <p class="help-text">הפריטים יתווספו <strong>למלאי ולרשימת המוצרים</strong> תחת הספק שנבחר. ניתן לערוך כל שורה לפני האישור — שם, מק״ט, יחידה, מחיר וספק.</p>
             <div id="intake-lines" class="intake-lines"></div>
             <p class="help-text" id="intake-summary"></p>
             <div class="modal-actions">
-                <button id="confirm-intake-btn" class="btn btn-primary">✅ אשר קליטה למלאי</button>
+                <button id="confirm-intake-btn" class="btn btn-primary">✅ אשר — למלאי ולבנק המוצרים</button>
                 <button id="cancel-intake-btn" class="btn btn-secondary">❌ ביטול</button>
             </div>
         </div>

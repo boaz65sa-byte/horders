@@ -47,7 +47,8 @@ module.exports = async (req, res) => {
                                         sku: { type: 'string', description: 'מק״ט / ברקוד / קוד פריט' },
                                         name: { type: 'string', description: 'שם הפריט בעברית' },
                                         quantity: { type: 'number', description: 'כמות שהתקבלה או שהוזמנה' },
-                                        unit: { type: 'string', description: 'יחידת מידה: ק״ג, יחידה, ארגז, קרטון וכו׳' }
+                                        unit: { type: 'string', description: 'יחידת מידה: ק״ג, יחידה, ארגז, קרטון וכו׳' },
+                                        price: { type: 'number', description: 'מחיר ליחידה אם מופיע במסמך' }
                                     },
                                     required: ['name', 'quantity'],
                                     additionalProperties: false
@@ -82,7 +83,8 @@ module.exports = async (req, res) => {
             sku: String(it.sku || '').trim(),
             name: String(it.name || '').trim(),
             quantity: Math.max(0, Number(it.quantity) || 0),
-            unit: String(it.unit || 'יחידה').trim() || 'יחידה'
+            unit: String(it.unit || 'יחידה').trim() || 'יחידה',
+            price: Math.max(0, Number(it.price) || 0)
         })).filter((it) => it.name && it.quantity > 0);
 
         res.status(200).json({
