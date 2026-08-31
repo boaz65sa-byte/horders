@@ -179,6 +179,8 @@
                 <p class="help-text">עדכן "כמות קיים" במלאי → "כמות להזמנה" (החוסר) מחושבת אוטומטית. "מלאי פתיחה" (כמה צריך להיות) נערך ע"י השף/מנהל בלבד.</p>
 
                 <button id="scan-stock-btn" class="btn btn-primary" style="background:linear-gradient(135deg,#5C6BC0,#3949AB);">📷 סרוק מוצר לקליטת מלאי (ברקוד / זיהוי בתמונה)</button>
+                <button id="intake-document-btn" class="btn btn-primary" style="background:linear-gradient(135deg,#00897B,#00695C);margin-top:8px;">📄 קליטת מלאי מקבלה / הזמנה (סריקה או אקסל)</button>
+                <input type="file" id="intake-document-input" accept="image/*,.xlsx,.xls,.csv" hidden>
 
                 <label for="inventory-supplier-select">בחר ספק:</label>
                 <select id="inventory-supplier-select" class="input-field">
@@ -401,6 +403,38 @@
 
                 <hr style="margin: 30px 0;">
 
+                <!-- Priority ERP -->
+                <div class="settings-section">
+                    <h3>🔗 Priority (פיוריטי)</h3>
+                    <p class="help-text">
+                        פרטי הגישה נשמרים בשרת Vercel בלבד (לא בדפדפן):<br>
+                        <code>PRIORITY_SERVICE_ROOT</code>, <code>PRIORITY_API_USER</code>, <code>PRIORITY_API_PASS</code>
+                    </p>
+                    <p id="priority-status-text" class="help-text" style="margin:8px 0;font-weight:600;">בודק חיבור…</p>
+                    <p id="priority-last-sync-text" class="help-text" style="margin:0 0 12px;"></p>
+
+                    <label style="display:flex;align-items:center;gap:8px;margin:12px 0;">
+                        <input type="checkbox" id="priority-send-on-approve">
+                        <span>באישור שף — צור גם הזמנת רכש ב-Priority (PORDERS)</span>
+                    </label>
+
+                    <button type="button" id="priority-sync-btn" class="btn btn-secondary">🔄 סנכרן ספקים ומוצרים מ-Priority</button>
+                    <button type="button" id="priority-refresh-status-btn" class="btn btn-secondary" style="margin-right:8px;">🔍 בדוק חיבור</button>
+                </div>
+
+                <hr style="margin: 30px 0;">
+
+                <!-- Data backup -->
+                <div class="settings-section">
+                    <h3>💾 גיבוי נתונים</h3>
+                    <p class="help-text">שמור עותק של כל הנתונים (מוצרים, ספקים, הזמנות, משתמשים) לפני שינויים גדולים.</p>
+                    <p id="backup-counts-text" class="help-text" style="font-weight:600;"></p>
+                    <button type="button" id="export-full-backup-btn" class="btn btn-primary">💾 הורד גיבוי מלא (JSON)</button>
+                    <button type="button" id="save-server-backup-btn" class="btn btn-secondary" style="margin-right:8px;">☁️ שמור גיבוי בשרת</button>
+                </div>
+
+                <hr style="margin: 30px 0;">
+
                 <!-- System Info -->
                 <div class="settings-section">
                     <h3>ℹ️ מידע על המערכת</h3>
@@ -526,6 +560,22 @@
 
             <div class="modal-actions">
                 <button id="close-batch-btn" class="btn btn-secondary">סגור</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Document Intake Modal (receipt / order → stock) -->
+    <div id="intake-modal" class="modal">
+        <div class="modal-content" style="max-width:720px;">
+            <h2>📄 קליטת מלאי ממסמך</h2>
+            <p class="help-text" id="intake-doc-info"></p>
+            <label for="intake-supplier-select">ספק:</label>
+            <select id="intake-supplier-select" class="input-field"></select>
+            <div id="intake-lines" class="intake-lines"></div>
+            <p class="help-text" id="intake-summary"></p>
+            <div class="modal-actions">
+                <button id="confirm-intake-btn" class="btn btn-primary">✅ אשר קליטה למלאי</button>
+                <button id="cancel-intake-btn" class="btn btn-secondary">❌ ביטול</button>
             </div>
         </div>
     </div>

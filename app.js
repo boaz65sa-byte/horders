@@ -522,11 +522,19 @@ class OrderSystem {
         this.approvalSettings = this.loadData('approvalSettings') || {
             chefPhone: '',
             managerPhone: '',
-            procurementEmail: ''
+            procurementEmail: '',
+            prioritySendOnApprove: false,
+            lastPrioritySync: ''
         };
-        // Back-fill new field for previously-saved settings
+        // Back-fill new fields for previously-saved settings
         if (this.approvalSettings.procurementEmail === undefined) {
             this.approvalSettings.procurementEmail = '';
+        }
+        if (this.approvalSettings.prioritySendOnApprove === undefined) {
+            this.approvalSettings.prioritySendOnApprove = false;
+        }
+        if (this.approvalSettings.lastPrioritySync === undefined) {
+            this.approvalSettings.lastPrioritySync = '';
         }
         this.preferences = this.loadData('preferences') || {
             showPrices: true,
@@ -541,6 +549,7 @@ class OrderSystem {
         this.sharedBankActive = false; // becomes true once the KV-backed shared bank is reachable
         this._sharedSaveTimer = null;
         this._dirtyKeys = new Set(); // which collections changed since the last shared save
+        this._intakeDraft = null;
         this.init();
     }
 
@@ -573,6 +582,7 @@ class OrderSystem {
         this.setupPush();
         this.initSharedBank();
         this.applyRoleVisibility();
+        setTimeout(() => this.refreshPriorityStatus(), 500);
     }
 
     isChefUser() {
@@ -601,6 +611,7 @@ class OrderSystem {
     normalizeSuppliers() {
         this.suppliers.forEach(s => {
             if (s.agentPhone === undefined) s.agentPhone = '';
+            if (s.prioritySupname === undefined) s.prioritySupname = '';
         });
     }
 
@@ -817,6 +828,16 @@ class OrderSystem {
         const testEmailBtn = document.getElementById('test-email-btn');
         if (testEmailBtn) testEmailBtn.addEventListener('click', () => this.sendTestEmail());
 
+        const prioritySyncBtn = document.getElementById('priority-sync-btn');
+        if (prioritySyncBtn) prioritySyncBtn.addEventListener('click', () => this.syncFromPriority());
+        const priorityRefreshBtn = document.getElementById('priority-refresh-status-btn');
+        if (priorityRefreshBtn) priorityRefreshBtn.addEventListener('click', () => this.refreshPriorityStatus());
+
+        const exportBackupBtn = document.getElementById('export-full-backup-btn');
+        if (exportBackupBtn) exportBackupBtn.addEventListener('click', () => this.exportFullBackup());
+        const saveServerBackupBtn = document.getElementById('save-server-backup-btn');
+        if (saveServerBackupBtn) saveServerBackupBtn.addEventListener('click', () => this.saveServerBackup());
+
         // Inventory tab
         const inventorySupplierSelect = document.getElementById('inventory-supplier-select');
         if (inventorySupplierSelect) inventorySupplierSelect.addEventListener('change', (e) => this.renderInventory(e.target.value));
@@ -894,6 +915,17 @@ class OrderSystem {
         // Stock-intake scanning (barcode / AI photo → identify existing product → add batch)
         const scanStockBtn = document.getElementById('scan-stock-btn');
         if (scanStockBtn) scanStockBtn.addEventListener('click', () => this.scanProduct());
+
+        const intakeDocBtn = document.getElementById('intake-document-btn');
+        const intakeDocInput = document.getElementById('intake-document-input');
+        if (intakeDocBtn && intakeDocInput) {
+            intakeDocBtn.addEventListener('click', () => { intakeDocInput.value = ''; intakeDocInput.click(); });
+            intakeDocInput.addEventListener('change', (e) => this.handleIntakeDocument(e));
+        }
+        const confirmIntakeBtn = document.getElementById('confirm-intake-btn');
+        if (confirmIntakeBtn) confirmIntakeBtn.addEventListener('click', () => this.confirmIntake());
+        const cancelIntakeBtn = document.getElementById('cancel-intake-btn');
+        if (cancelIntakeBtn) cancelIntakeBtn.addEventListener('click', () => this.closeIntakeModal());
         const scanCameraInput = document.getElementById('scan-camera-input');
         if (scanCameraInput) scanCameraInput.addEventListener('change', (e) => this.handleScanImage(e));
         const scanSearch = document.getElementById('scan-search');
@@ -954,6 +986,10 @@ class OrderSystem {
         }
         if (tabName === 'needs') this.renderNeeds();
         if (tabName === 'dashboard') this.renderDashboard();
+        if (tabName === 'settings') {
+            this.refreshPriorityStatus();
+            this.updateBackupCountsText();
+        }
     }
 
     // ===========================
@@ -1368,6 +1404,10 @@ class OrderSystem {
                 p.createdAt = (Number.isFinite(idNum) && idNum > 1e11)
                     ? new Date(idNum).toISOString()
                     : '1970-01-01T00:00:00.000Z';
+                changed = true;
+            }
+            if (p.priorityPartName === undefined) {
+                p.priorityPartName = p.sku || '';
                 changed = true;
             }
         });
@@ -3927,6 +3967,7 @@ class OrderSystem {
         return {
             ...item,
             sku: item.sku || (product && (product.sku || product.id)) || '—',
+            priorityPartName: item.priorityPartName || (product && product.priorityPartName) || item.sku || (product && product.sku) || '',
             stockQty: item.stockQty != null ? item.stockQty : (product ? (Number(product.stockQty) || 0) : '—'),
             parLevel: item.parLevel != null ? item.parLevel : (product ? (Number(product.parLevel) || 0) : '—')
         };
@@ -4225,6 +4266,17 @@ class OrderSystem {
         });
 
         await this.dispatchOrder(supplier, message, order.sendMethod, procurementEmail, emailPayload);
+
+        if (this.approvalSettings.prioritySendOnApprove) {
+            try {
+                const pr = await this.pushOrderToPriority(order, supplier);
+                if (pr && pr.skipped && pr.skipped.length) {
+                    this.showAlert(`נשלח לספק. ב-Priority: ${pr.lineCount} שורות, ${pr.skipped.length} דולגו (חסר מק״ט)`, 'info');
+                }
+            } catch (e) {
+                this.showAlert(`נשלח לספק, אך Priority נכשל: ${e.message}`, 'info');
+            }
+        }
 
         // Notify the orders manager via WhatsApp
         const managerPhone = this.approvalSettings.managerPhone;
@@ -4790,6 +4842,364 @@ class OrderSystem {
     }
 
     // ===========================
+    // Full backup (local download + server snapshot)
+    // ===========================
+
+    buildFullBackupPayload() {
+        return {
+            version: '3.2',
+            timestamp: new Date().toISOString(),
+            date: new Date().toLocaleString('he-IL'),
+            counts: {
+                suppliers: this.suppliers.length,
+                products: this.products.length,
+                history: this.history.length,
+                pendingOrders: this.pendingOrders.length,
+                users: this.users.length,
+                needs: this.needs.length
+            },
+            data: {
+                suppliers: this.suppliers,
+                products: this.products,
+                history: this.history,
+                pendingOrders: this.pendingOrders,
+                staff: this.staff,
+                users: this.users,
+                needs: this.needs,
+                approvalSettings: this.approvalSettings,
+                preferences: this.preferences
+            }
+        };
+    }
+
+    updateBackupCountsText() {
+        const el = document.getElementById('backup-counts-text');
+        if (!el) return;
+        el.textContent = `כרגע במערכת: ${this.suppliers.length} ספקים · ${this.products.length} מוצרים · ${this.history.length} הזמנות בהיסטוריה`;
+    }
+
+    exportFullBackup() {
+        if (!this.isChefUser()) {
+            this.showAlert('רק השף יכול לייצא גיבוי מלא', 'info');
+            return;
+        }
+        const payload = this.buildFullBackupPayload();
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `horders-backup-${stamp}.json`;
+        a.click();
+        this.showAlert('✅ גיבוי הורד למחשב', 'success');
+    }
+
+    async saveServerBackup() {
+        if (!this.isChefUser()) {
+            this.showAlert('רק השף יכול לשמור גיבוי בשרת', 'info');
+            return;
+        }
+        const btn = document.getElementById('save-server-backup-btn');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ שומר…'; }
+        try {
+            const r = await fetch('/api/backup', { method: 'POST' });
+            const data = await r.json();
+            if (!r.ok) throw new Error(data.error || 'שמירת גיבוי נכשלה');
+            this.showAlert(`✅ גיבוי נשמר בשרת (${data.counts.products} מוצרים, ${data.counts.suppliers} ספקים)`, 'success');
+        } catch (e) {
+            this.showAlert('שמירת גיבוי בשרת נכשלה: ' + e.message, 'info');
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = '☁️ שמור גיבוי בשרת'; }
+        }
+    }
+
+    // ===========================
+    // Document intake → inventory (receipt / order scan or Excel)
+    // ===========================
+
+    startIntakeDocument() {
+        const input = document.getElementById('intake-document-input');
+        if (input) { input.value = ''; input.click(); }
+    }
+
+    async handleIntakeDocument(event) {
+        const file = event.target.files && event.target.files[0];
+        if (!file) return;
+        this.showAlert('📄 מעבד מסמך…', 'info');
+        try {
+            const ext = (file.name.split('.').pop() || '').toLowerCase();
+            let parsed;
+            if (['xlsx', 'xls', 'csv'].includes(ext)) {
+                parsed = await this.parseIntakeSpreadsheet(file);
+            } else if (file.type.startsWith('image/')) {
+                parsed = await this.parseIntakeImage(file);
+            } else {
+                throw new Error('פורמט לא נתמך — העלה תמונה או Excel/CSV');
+            }
+            this.openIntakeModal(parsed);
+        } catch (e) {
+            this.showAlert('שגיאה בקריאת המסמך: ' + e.message, 'info');
+        }
+    }
+
+    async parseIntakeImage(file) {
+        const dataUrl = await this.compressImage(file, 1200, 0.85);
+        const r = await fetch('/api/parse-receipt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: dataUrl })
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || j.hint || 'סריקת המסמך נכשלה');
+        return {
+            supplierName: j.supplierName || '',
+            documentType: j.documentType || 'delivery_note',
+            items: j.items || []
+        };
+    }
+
+    parseIntakeSpreadsheet(file) {
+        return new Promise((resolve, reject) => {
+            if (typeof XLSX === 'undefined') {
+                reject(new Error('רכיב Excel לא נטען'));
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const wb = XLSX.read(e.target.result, { type: 'array' });
+                    const sheet = wb.Sheets[wb.SheetNames[0]];
+                    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+                    const parsed = this.rowsToIntakePayload(rows);
+                    resolve(parsed);
+                } catch (err) {
+                    reject(err);
+                }
+            };
+            reader.onerror = () => reject(new Error('לא ניתן לקרוא את הקובץ'));
+            reader.readAsArrayBuffer(file);
+        });
+    }
+
+    rowsToIntakePayload(rows) {
+        const colMap = { sku: -1, name: -1, qty: -1, unit: -1, supplier: -1 };
+        const patterns = {
+            sku: ['מקט', 'מק״ט', 'sku', 'קוד', 'ברקוד', 'part', 'partname'],
+            name: ['שם', 'פריט', 'מוצר', 'תיאור', 'שם פריט', 'שם מוצר'],
+            qty: ['כמות', 'qty', 'quantity', 'כמות שהתקבלה', 'כמות קיימת', 'כמות להזמנה'],
+            unit: ['יחידה', 'unit', 'יח'],
+            supplier: ['ספק', 'supplier', 'שם ספק']
+        };
+        let headerRow = -1;
+        for (let r = 0; r < Math.min(rows.length, 8); r++) {
+            const row = (rows[r] || []).map(c => String(c).trim().toLowerCase());
+            Object.keys(patterns).forEach((key) => {
+                const idx = row.findIndex(cell => patterns[key].some(p => cell.includes(p)));
+                if (idx >= 0) colMap[key] = idx;
+            });
+            if (colMap.name >= 0 && colMap.qty >= 0) {
+                headerRow = r;
+                break;
+            }
+        }
+        if (headerRow < 0) {
+            throw new Error('לא נמצאו עמודות שם + כמות בקובץ. צפוי: מק״ט | שם | כמות | יחידה | ספק');
+        }
+        let supplierName = '';
+        const items = [];
+        for (let r = headerRow + 1; r < rows.length; r++) {
+            const row = rows[r] || [];
+            const name = colMap.name >= 0 ? String(row[colMap.name] || '').trim() : '';
+            const qty = colMap.qty >= 0 ? (parseFloat(row[colMap.qty]) || 0) : 0;
+            if (!name || qty <= 0) continue;
+            const sku = colMap.sku >= 0 ? String(row[colMap.sku] || '').trim() : '';
+            const unit = colMap.unit >= 0 ? String(row[colMap.unit] || 'יחידה').trim() : 'יחידה';
+            const sup = colMap.supplier >= 0 ? String(row[colMap.supplier] || '').trim() : '';
+            if (sup && !supplierName) supplierName = sup;
+            items.push({ sku, name, quantity: qty, unit: unit || 'יחידה' });
+        }
+        if (!items.length) throw new Error('לא נמצאו שורות מוצרים בקובץ');
+        return { supplierName, documentType: 'spreadsheet', items };
+    }
+
+    resolveIntakeSupplier(supplierName) {
+        const raw = String(supplierName || '').trim();
+        if (!raw) return null;
+        const low = raw.toLowerCase();
+        return this.suppliers.find(s =>
+            s.name.toLowerCase() === low ||
+            String(s.prioritySupname || '').toLowerCase() === low ||
+            s.name.toLowerCase().includes(low) ||
+            low.includes(s.name.toLowerCase())
+        ) || null;
+    }
+
+    findProductForIntake(line, supplierId) {
+        const sku = String(line.sku || '').trim();
+        const name = String(line.name || '').trim().toLowerCase();
+        const matchSku = (p) =>
+            sku && (p.sku === sku || p.priorityPartName === sku || p.id === sku);
+        if (sku) {
+            if (supplierId) {
+                const p = this.products.find(p => p.supplierId === supplierId && matchSku(p));
+                if (p) return p;
+            }
+            const p = this.products.find(matchSku);
+            if (p) return p;
+        }
+        if (name && supplierId) {
+            const p = this.products.find(p => p.supplierId === supplierId && p.name.toLowerCase() === name);
+            if (p) return p;
+        }
+        if (name) {
+            return this.products.find(p => p.name.toLowerCase() === name) || null;
+        }
+        return null;
+    }
+
+    prepareIntakeLines(parsed) {
+        const supplier = this.resolveIntakeSupplier(parsed.supplierName);
+        const supplierId = supplier ? supplier.id : '';
+        return (parsed.items || []).map((line) => {
+            const product = this.findProductForIntake(line, supplierId);
+            return {
+                sku: line.sku || '',
+                name: line.name,
+                quantity: line.quantity,
+                unit: line.unit || 'יחידה',
+                productId: product ? product.id : '',
+                status: product ? 'matched' : 'new'
+            };
+        });
+    }
+
+    openIntakeModal(parsed) {
+        const supplier = this.resolveIntakeSupplier(parsed.supplierName);
+        this._intakeDraft = {
+            supplierName: parsed.supplierName || (supplier && supplier.name) || '',
+            supplierId: supplier ? supplier.id : '',
+            documentType: parsed.documentType || '',
+            lines: this.prepareIntakeLines(parsed)
+        };
+
+        const info = document.getElementById('intake-doc-info');
+        if (info) {
+            info.textContent = parsed.documentType === 'spreadsheet'
+                ? `קובץ Excel — ${this._intakeDraft.lines.length} שורות`
+                : `מסמך מצולם — ${this._intakeDraft.lines.length} שורות זוהו`;
+        }
+
+        const sel = document.getElementById('intake-supplier-select');
+        if (sel) {
+            sel.innerHTML = '<option value="">-- בחר ספק --</option>' +
+                this.suppliers.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+            sel.value = this._intakeDraft.supplierId || '';
+            sel.onchange = () => {
+                this._intakeDraft.supplierId = sel.value;
+                this._intakeDraft.lines = this.prepareIntakeLines({
+                    supplierName: this.suppliers.find(s => s.id === sel.value)?.name || '',
+                    items: this._intakeDraft.lines.map(l => ({
+                        sku: l.sku, name: l.name, quantity: l.quantity, unit: l.unit
+                    }))
+                });
+                this.renderIntakePreview();
+            };
+        }
+
+        this.renderIntakePreview();
+        document.getElementById('intake-modal').classList.add('active');
+    }
+
+    renderIntakePreview() {
+        const container = document.getElementById('intake-lines');
+        const summary = document.getElementById('intake-summary');
+        if (!container || !this._intakeDraft) return;
+        const matched = this._intakeDraft.lines.filter(l => l.status === 'matched').length;
+        const fresh = this._intakeDraft.lines.filter(l => l.status === 'new').length;
+        container.innerHTML = `
+            <div class="intake-row intake-row-head">
+                <span>פריט</span><span>מק״ט</span><span>כמות</span><span>סטטוס</span>
+            </div>
+        ` + this._intakeDraft.lines.map((l, i) => `
+            <div class="intake-row ${l.status === 'new' ? 'intake-new' : ''}">
+                <span>${this.escapeHtml(l.name)}</span>
+                <span class="intake-sku">${this.escapeHtml(l.sku || '—')}</span>
+                <input type="number" class="input-field intake-qty-input" data-idx="${i}" min="0" step="0.5" value="${l.quantity}" style="margin:0;padding:6px;">
+                <span class="intake-status">${l.status === 'matched' ? '✅ קיים' : '🆕 חדש'}</span>
+            </div>
+        `).join('');
+        if (summary) {
+            summary.textContent = `${matched} פריטים קיימים יתווספו למלאי · ${fresh} פריטים חדשים ייווצרו בבנק`;
+        }
+    }
+
+    confirmIntake() {
+        if (!this._intakeDraft) return;
+        const supplierId = document.getElementById('intake-supplier-select')?.value || this._intakeDraft.supplierId;
+        if (!supplierId) {
+            alert('נא לבחור ספק לפני קליטה');
+            return;
+        }
+        const supplier = this.suppliers.find(s => s.id === supplierId);
+        if (!supplier) return;
+
+        document.querySelectorAll('.intake-qty-input').forEach(inp => {
+            const idx = parseInt(inp.dataset.idx, 10);
+            if (this._intakeDraft.lines[idx]) {
+                this._intakeDraft.lines[idx].quantity = Math.max(0, parseFloat(inp.value) || 0);
+            }
+        });
+
+        let stockUpdated = 0;
+        let created = 0;
+        this._intakeDraft.lines.forEach((line) => {
+            if (line.quantity <= 0) return;
+            let product = line.productId ? this.products.find(p => p.id === line.productId) : null;
+            if (!product) product = this.findProductForIntake(line, supplierId);
+
+            if (!product) {
+                product = {
+                    id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
+                    supplierId,
+                    name: line.name,
+                    price: 0,
+                    unit: line.unit || 'יחידה',
+                    image: '',
+                    sku: line.sku || '',
+                    priorityPartName: line.sku || '',
+                    stockQty: 0,
+                    createdAt: this.productCreatedAt()
+                };
+                this.products.push(product);
+                created++;
+            }
+
+            this.addBatchToProduct(product, line.quantity, '');
+            stockUpdated++;
+        });
+
+        this.saveData('products', this.products);
+        this.closeIntakeModal();
+        this.loadSupplierSelects();
+        this.renderAllProducts();
+        this.renderDashboard();
+
+        const invSel = document.getElementById('inventory-supplier-select');
+        if (invSel) {
+            invSel.value = supplierId;
+            this.renderInventory(supplierId);
+            document.getElementById('inventory-controls').style.display = 'block';
+        }
+
+        this.showAlert(`📥 קליטה הושלמה: ${stockUpdated} פריטים למלאי${created ? ` (${created} חדשים בבנק)` : ''}`, 'success');
+    }
+
+    closeIntakeModal() {
+        this._intakeDraft = null;
+        const modal = document.getElementById('intake-modal');
+        if (modal) modal.classList.remove('active');
+    }
+
+    // ===========================
     // Receiving (mark what arrived → update inventory stock)
     // ===========================
 
@@ -5009,9 +5419,166 @@ class OrderSystem {
         const chefInput = document.getElementById('chef-phone-input');
         const managerInput = document.getElementById('manager-phone-input');
         const procurementInput = document.getElementById('procurement-email-input');
+        const prioritySend = document.getElementById('priority-send-on-approve');
         if (chefInput) chefInput.value = this.approvalSettings.chefPhone || '';
         if (managerInput) managerInput.value = this.approvalSettings.managerPhone || '';
         if (procurementInput) procurementInput.value = this.approvalSettings.procurementEmail || '';
+        if (prioritySend) prioritySend.checked = !!this.approvalSettings.prioritySendOnApprove;
+        this.updatePriorityLastSyncText();
+    }
+
+    updatePriorityLastSyncText() {
+        const el = document.getElementById('priority-last-sync-text');
+        if (!el) return;
+        const ts = this.approvalSettings.lastPrioritySync;
+        if (!ts) {
+            el.textContent = 'סנכרון אחרון מ-Priority: עדיין לא בוצע';
+            return;
+        }
+        el.textContent = 'סנכרון אחרון מ-Priority: ' + new Date(ts).toLocaleString('he-IL');
+    }
+
+    async refreshPriorityStatus() {
+        const el = document.getElementById('priority-status-text');
+        if (!el) return;
+        el.textContent = 'בודק חיבור…';
+        try {
+            const r = await fetch('/api/priority/status');
+            const data = await r.json();
+            if (!data.configured) {
+                el.textContent = '⚠️ Priority לא מוגדר בשרת — הוסף משתני סביבה ב-Vercel';
+                return;
+            }
+            if (data.connectionOk) {
+                el.textContent = `✅ מחובר ל-Priority ${data.serviceRootPreview || ''}`;
+            } else {
+                el.textContent = `❌ שגיאת חיבור: ${data.error || 'לא ידוע'}`;
+            }
+        } catch (e) {
+            el.textContent = '❌ לא ניתן לבדוק חיבור לשרת';
+        }
+    }
+
+    mergePrioritySuppliers(remote) {
+        let added = 0;
+        let updated = 0;
+        (remote || []).forEach((rs) => {
+            const code = String(rs.prioritySupname || '').trim();
+            if (!code) return;
+            let local = this.suppliers.find(s => s.prioritySupname === code);
+            if (!local) local = this.suppliers.find(s => s.name === rs.name);
+            if (local) {
+                local.prioritySupname = code;
+                if (rs.email) local.email = rs.email;
+                if (rs.phone) local.phone = rs.phone;
+                if (rs.name) local.name = rs.name;
+                if (rs.category && !local.category) local.category = rs.category;
+                updated++;
+            } else {
+                this.suppliers.push({
+                    id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
+                    name: rs.name || code,
+                    phone: rs.phone || '',
+                    agentPhone: '',
+                    email: rs.email || '',
+                    category: rs.category || 'ספק',
+                    prioritySupname: code,
+                    orderDays: []
+                });
+                added++;
+            }
+        });
+        return { added, updated };
+    }
+
+    mergePriorityProducts(remote) {
+        let added = 0;
+        let updated = 0;
+        const fallbackSupplierId = (this.suppliers[0] && this.suppliers[0].id) || '';
+        (remote || []).forEach((rp) => {
+            const part = String(rp.priorityPartName || rp.sku || '').trim();
+            if (!part) return;
+            let local = this.products.find(p => p.priorityPartName === part);
+            if (!local) local = this.products.find(p => p.sku === part || p.name === rp.name);
+            if (local) {
+                local.priorityPartName = part;
+                local.sku = part;
+                if (rp.name) local.name = rp.name;
+                if (rp.unit) local.unit = rp.unit;
+                if (rp.price > 0) local.price = rp.price;
+                updated++;
+            } else {
+                this.products.push({
+                    id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
+                    supplierId: fallbackSupplierId,
+                    name: rp.name || part,
+                    price: rp.price || 0,
+                    unit: rp.unit || 'יחידה',
+                    image: '',
+                    sku: part,
+                    priorityPartName: part,
+                    createdAt: this.productCreatedAt()
+                });
+                added++;
+            }
+        });
+        return { added, updated };
+    }
+
+    async syncFromPriority() {
+        if (!this.isChefUser()) {
+            this.showAlert('רק השף יכול לסנכרן מ-Priority', 'info');
+            return;
+        }
+        const btn = document.getElementById('priority-sync-btn');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ מסנכרן…'; }
+        try {
+            const r = await fetch('/api/priority/sync', { method: 'POST' });
+            const data = await r.json();
+            if (!r.ok) throw new Error(data.error || data.hint || 'סנכרון נכשל');
+
+            const supStats = this.mergePrioritySuppliers(data.suppliers);
+            const prodStats = this.mergePriorityProducts(data.products);
+            this.normalizeSuppliers();
+            this.saveData('suppliers', this.suppliers);
+            this.saveData('products', this.products);
+
+            this.approvalSettings.lastPrioritySync = data.syncedAt || new Date().toISOString();
+            this.saveData('approvalSettings', this.approvalSettings);
+            this.updatePriorityLastSyncText();
+
+            this.loadSupplierSelects();
+            this.loadSuppliersDisplay();
+            this.renderAllProducts();
+            this.renderDashboard();
+
+            this.showAlert(
+                `✅ סנכרון מ-Priority: ${supStats.added + supStats.updated} ספקים, ${prodStats.added + prodStats.updated} מוצרים`,
+                'success'
+            );
+            await this.refreshPriorityStatus();
+        } catch (e) {
+            this.showAlert('סנכרון Priority נכשל: ' + e.message, 'info');
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = '🔄 סנכרן ספקים ומוצרים מ-Priority'; }
+        }
+    }
+
+    async pushOrderToPriority(order, supplier) {
+        const enrichedItems = (order.items || []).map(it => this.enrichOrderItem(it));
+        const r = await fetch('/api/priority/create-order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                supplier,
+                deliveryDate: order.deliveryDate,
+                items: enrichedItems,
+                note: order.message || ''
+            })
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || data.hint || 'יצירת הזמנה ב-Priority נכשלה');
+        return data;
     }
 
     saveApprovalSettings() {
@@ -5022,10 +5589,12 @@ class OrderSystem {
         const chefPhone = document.getElementById('chef-phone-input').value.trim();
         const managerPhone = document.getElementById('manager-phone-input').value.trim();
         const procurementEmail = document.getElementById('procurement-email-input').value.trim();
+        const prioritySend = document.getElementById('priority-send-on-approve');
 
         this.approvalSettings.chefPhone = chefPhone;
         this.approvalSettings.managerPhone = managerPhone;
         this.approvalSettings.procurementEmail = procurementEmail;
+        if (prioritySend) this.approvalSettings.prioritySendOnApprove = prioritySend.checked;
         this.saveData('approvalSettings', this.approvalSettings);
 
         this.showAlert('✅ ההגדרות נשמרו', 'success');

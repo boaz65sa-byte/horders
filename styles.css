@@ -1576,3 +1576,19 @@ label {
 .batch-total { font-weight: 700; color: #2e7d32; margin-top: 8px; text-align: left; }
 .inv-batch-note { font-size: 12px; color: #E65100; font-weight: 600; }
 .receive-expiry { width: 140px; margin: 0; font-size: 13px; padding: 6px; }
+
+.intake-lines { max-height: 50vh; overflow-y: auto; margin: 12px 0; }
+.intake-row {
+    display: grid;
+    grid-template-columns: 1fr 72px 56px 72px;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #eee;
+    font-size: 14px;
+}
+.intake-row.intake-new { background: #fff8e1; }
+.intake-row.intake-miss { background: #ffebee; }
+.intake-row-head { font-weight: 700; color: #555; border-bottom: 2px solid #ddd; }
+.intake-sku { font-family: monospace; font-size: 12px; color: #666; }
+.intake-status { font-size: 12px; font-weight: 600; }
