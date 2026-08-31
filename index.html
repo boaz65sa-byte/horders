@@ -181,6 +181,7 @@
                 <button id="scan-stock-btn" class="btn btn-primary" style="background:linear-gradient(135deg,#5C6BC0,#3949AB);">📷 סרוק מוצר לקליטת מלאי (ברקוד / זיהוי בתמונה)</button>
                 <button id="intake-document-btn" class="btn btn-primary" style="background:linear-gradient(135deg,#00897B,#00695C);margin-top:8px;">📄 קליטת קבלה / חשבונית (מלאי + בנק מוצרים)</button>
                 <button id="download-intake-template-btn" class="btn btn-secondary" style="margin-top:8px;">📥 הורד תבנית אקסל לקליטה</button>
+                <p class="help-text" style="margin-top:6px;">📷 <strong>תמונה</strong> — מתאים לכל ספק (AI קורא את הקבלה) · 📊 <strong>אקסל</strong> — תמיד תוכל למפות עמודות ידנית (כל ספק בפורמט אחר)</p>
                 <input type="file" id="intake-document-input" accept="image/*,.xlsx,.xls,.csv" hidden>
 
                 <label for="inventory-supplier-select">בחר ספק:</label>
@@ -578,6 +579,32 @@
 
             <div class="modal-actions">
                 <button id="close-batch-btn" class="btn btn-secondary">סגור</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Excel column mapping (each supplier uses different columns) -->
+    <div id="intake-map-modal" class="modal">
+        <div class="modal-content intake-modal-content">
+            <h2>📊 מיפוי עמודות — כל ספק בפורמט אחר</h2>
+            <p class="help-text">בחר איזו עמודה בקובץ היא שם הפריט, כמות וכו'. אם יש כותרות — ציין באיזו שורה.</p>
+            <label for="intake-map-supplier">שמור מיפוי לספק (אופציונלי):</label>
+            <select id="intake-map-supplier" class="input-field"></select>
+            <label for="intake-map-header-row">שורת כותרות בקובץ:</label>
+            <select id="intake-map-header-row" class="input-field"></select>
+            <div class="intake-map-fields">
+                <div><label>שם / תיאור פריט *</label><select id="intake-map-col-name" class="input-field"></select></div>
+                <div><label>כמות *</label><select id="intake-map-col-qty" class="input-field"></select></div>
+                <div><label>מק״ט</label><select id="intake-map-col-sku" class="input-field"></select></div>
+                <div><label>יחידה</label><select id="intake-map-col-unit" class="input-field"></select></div>
+                <div><label>מחיר</label><select id="intake-map-col-price" class="input-field"></select></div>
+                <div><label>ספק (בשורה)</label><select id="intake-map-col-supplier" class="input-field"></select></div>
+            </div>
+            <p class="help-text" style="font-weight:600;">תצוגה מקדימה (5 שורות ראשונות אחרי הכותרת):</p>
+            <div id="intake-map-preview" class="intake-map-preview"></div>
+            <div class="modal-actions">
+                <button id="intake-map-apply-btn" class="btn btn-primary">➡️ המשך לקליטה</button>
+                <button id="intake-map-cancel-btn" class="btn btn-secondary">❌ ביטול</button>
             </div>
         </div>
     </div>

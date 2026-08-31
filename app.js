@@ -1068,6 +1068,23 @@ class OrderSystem {
         if (confirmIntakeBtn) confirmIntakeBtn.addEventListener('click', () => this.confirmIntake());
         const cancelIntakeBtn = document.getElementById('cancel-intake-btn');
         if (cancelIntakeBtn) cancelIntakeBtn.addEventListener('click', () => this.closeIntakeModal());
+        const intakeMapApplyBtn = document.getElementById('intake-map-apply-btn');
+        if (intakeMapApplyBtn) intakeMapApplyBtn.addEventListener('click', () => this.applyIntakeColumnMap());
+        const intakeMapCancelBtn = document.getElementById('intake-map-cancel-btn');
+        if (intakeMapCancelBtn) intakeMapCancelBtn.addEventListener('click', () => this.closeIntakeMapModal());
+        ['intake-map-header-row', 'intake-map-col-name', 'intake-map-col-qty', 'intake-map-col-sku',
+            'intake-map-col-unit', 'intake-map-col-price', 'intake-map-col-supplier', 'intake-map-supplier'
+        ].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('change', () => this.renderIntakeMapPreview());
+        });
+        const intakeMapHeaderRow = document.getElementById('intake-map-header-row');
+        if (intakeMapHeaderRow) {
+            intakeMapHeaderRow.addEventListener('change', () => {
+                this.refreshIntakeMapColumnSelects();
+                this.renderIntakeMapPreview();
+            });
+        }
         const scanCameraInput = document.getElementById('scan-camera-input');
         if (scanCameraInput) scanCameraInput.addEventListener('change', (e) => this.handleScanImage(e));
         const scanSearch = document.getElementById('scan-search');
@@ -5284,18 +5301,18 @@ class OrderSystem {
         this.showAlert('📄 מעבד מסמך…', 'info');
         try {
             const ext = (file.name.split('.').pop() || '').toLowerCase();
-            let parsed;
             if (['xlsx', 'xls', 'csv'].includes(ext)) {
-                parsed = await this.parseIntakeSpreadsheet(file);
+                const rows = await this.readSpreadsheetRows(file);
+                this.openIntakeMapModal(rows);
             } else if (file.type.startsWith('image/')) {
-                parsed = await this.parseIntakeImage(file);
+                const parsed = await this.parseIntakeImage(file);
+                this.openIntakeModal(parsed);
             } else {
                 throw new Error('פורמט לא נתמך — העלה תמונה או Excel/CSV');
             }
-            this.openIntakeModal(parsed);
         } catch (e) {
             const hint = /\.(xlsx?|csv)$/i.test(file.name)
-                ? ' נסה להוריד את התבנית, או צלם את הקבלה כתמונה.'
+                ? ' נסה למפות עמודות ידנית, או צלם את הקבלה כתמונה.'
                 : '';
             this.showAlert('שגיאה בקריאת המסמך: ' + e.message + hint, 'info');
         }
@@ -5317,7 +5334,7 @@ class OrderSystem {
         };
     }
 
-    parseIntakeSpreadsheet(file) {
+    readSpreadsheetRows(file) {
         return new Promise((resolve, reject) => {
             if (typeof XLSX === 'undefined') {
                 reject(new Error('רכיב Excel לא נטען'));
@@ -5329,8 +5346,8 @@ class OrderSystem {
                     const wb = XLSX.read(e.target.result, { type: 'array' });
                     const sheet = wb.Sheets[wb.SheetNames[0]];
                     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-                    const parsed = this.rowsToIntakePayload(rows);
-                    resolve(parsed);
+                    if (!rows.length) throw new Error('הקובץ ריק');
+                    resolve(rows);
                 } catch (err) {
                     reject(err);
                 }
@@ -5338,6 +5355,165 @@ class OrderSystem {
             reader.onerror = () => reject(new Error('לא ניתן לקרוא את הקובץ'));
             reader.readAsArrayBuffer(file);
         });
+    }
+
+    getIntakeMapColCount(rows) {
+        return Math.max(...rows.slice(0, 30).map(r => (r || []).length), 0);
+    }
+
+    loadSavedIntakeMap(supplierId) {
+        if (!supplierId) return null;
+        try {
+            const maps = JSON.parse(localStorage.getItem('intakeColumnMaps') || '{}');
+            return maps[supplierId] || null;
+        } catch { return null; }
+    }
+
+    saveIntakeMapForSupplier(supplierId, mapping) {
+        if (!supplierId) return;
+        try {
+            const maps = JSON.parse(localStorage.getItem('intakeColumnMaps') || '{}');
+            maps[supplierId] = mapping;
+            localStorage.setItem('intakeColumnMaps', JSON.stringify(maps));
+        } catch { /* ignore */ }
+    }
+
+    buildIntakeMapColumnOptions(rows, headerRow, selectedIdx) {
+        const colCount = this.getIntakeMapColCount(rows);
+        const header = headerRow >= 0 ? (rows[headerRow] || []) : [];
+        let html = '<option value="-1">— לא בשימוש —</option>';
+        for (let i = 0; i < colCount; i++) {
+            const h = headerRow >= 0 ? this.normalizeIntakeCell(header[i]) : '';
+            const label = h ? `${i + 1}: ${h}` : `עמודה ${i + 1}`;
+            html += `<option value="${i}"${i === selectedIdx ? ' selected' : ''}>${this.escapeHtml(label)}</option>`;
+        }
+        return html;
+    }
+
+    getIntakeMapFormValues() {
+        const headerRow = parseInt(document.getElementById('intake-map-header-row')?.value ?? '-1', 10);
+        const pick = (id) => parseInt(document.getElementById(id)?.value ?? '-1', 10);
+        return {
+            headerRow,
+            colMap: {
+                name: pick('intake-map-col-name'),
+                qty: pick('intake-map-col-qty'),
+                sku: pick('intake-map-col-sku'),
+                unit: pick('intake-map-col-unit'),
+                price: pick('intake-map-col-price'),
+                supplier: pick('intake-map-col-supplier')
+            }
+        };
+    }
+
+    openIntakeMapModal(rows) {
+        this._intakeMapRows = rows;
+        const detected = this.detectIntakeColumns(rows);
+        let headerRow = detected.headerRow >= 0 ? detected.headerRow : 0;
+        let colMap = detected.colMap || { name: 0, qty: 1, sku: -1, unit: -1, price: -1, supplier: -1 };
+
+        const mapSupplierSel = document.getElementById('intake-map-supplier');
+        if (mapSupplierSel) {
+            mapSupplierSel.innerHTML = '<option value="">— בלי שמירה —</option>' +
+                this.suppliers.map(s => `<option value="${s.id}">${this.escapeHtml(s.name)}</option>`).join('');
+            mapSupplierSel.onchange = () => {
+                const saved = this.loadSavedIntakeMap(mapSupplierSel.value);
+                if (saved) {
+                    const hr = document.getElementById('intake-map-header-row');
+                    if (hr) hr.value = String(saved.headerRow);
+                    this._intakeMapPendingColMap = saved.colMap;
+                    this.refreshIntakeMapColumnSelects(saved.colMap);
+                }
+                this.renderIntakeMapPreview();
+            };
+        }
+
+        const headerSel = document.getElementById('intake-map-header-row');
+        if (headerSel) {
+            headerSel.innerHTML = '<option value="-1">אין שורת כותרת</option>' +
+                rows.slice(0, 25).map((row, i) => {
+                    const preview = (row || []).slice(0, 4).map(c => this.normalizeIntakeCell(c)).filter(Boolean).join(' | ');
+                    return `<option value="${i}">שורה ${i + 1}${preview ? ': ' + this.escapeHtml(preview.slice(0, 40)) : ''}</option>`;
+                }).join('');
+            headerSel.value = String(headerRow);
+        }
+
+        this._intakeMapPendingColMap = colMap;
+        this.refreshIntakeMapColumnSelects(colMap);
+        this.renderIntakeMapPreview();
+        document.getElementById('intake-map-modal').classList.add('active');
+    }
+
+    setIntakeMapColumnValues(colMap) {
+        this._intakeMapPendingColMap = colMap;
+    }
+
+    refreshIntakeMapColumnSelects(colMapOverride) {
+        const rows = this._intakeMapRows;
+        if (!rows) return;
+        const headerRow = parseInt(document.getElementById('intake-map-header-row')?.value ?? '0', 10);
+        const vals = colMapOverride || this._intakeMapPendingColMap || this.getIntakeMapFormValues().colMap;
+        const fields = [
+            ['intake-map-col-name', vals.name],
+            ['intake-map-col-qty', vals.qty],
+            ['intake-map-col-sku', vals.sku],
+            ['intake-map-col-unit', vals.unit],
+            ['intake-map-col-price', vals.price],
+            ['intake-map-col-supplier', vals.supplier]
+        ];
+        fields.forEach(([id, sel]) => {
+            const el = document.getElementById(id);
+            if (el) el.innerHTML = this.buildIntakeMapColumnOptions(rows, headerRow, sel);
+        });
+    }
+
+    renderIntakeMapPreview() {
+        const el = document.getElementById('intake-map-preview');
+        if (!el || !this._intakeMapRows) return;
+        const { headerRow, colMap } = this.getIntakeMapFormValues();
+        if (colMap.name < 0 || colMap.qty < 0) {
+            el.innerHTML = '<p class="help-text">בחר עמודות <strong>שם</strong> ו-<strong>כמות</strong> לתצוגה מקדימה</p>';
+            return;
+        }
+        try {
+            const parsed = this.rowsToIntakePayloadFromMapping(this._intakeMapRows, headerRow, colMap);
+            const preview = parsed.items.slice(0, 5);
+            el.innerHTML = `<table><thead><tr><th>שם</th><th>כמות</th><th>יחידה</th><th>מחיר</th></tr></thead><tbody>` +
+                preview.map(it => `<tr><td>${this.escapeHtml(it.name)}</td><td>${it.quantity}</td><td>${this.escapeHtml(it.unit)}</td><td>${it.price || '—'}</td></tr>`).join('') +
+                `</tbody></table><p class="help-text" style="margin-top:6px;">סה״כ ${parsed.items.length} שורות בקובץ</p>`;
+        } catch (e) {
+            el.innerHTML = `<p class="help-text" style="color:#c62828;">${this.escapeHtml(e.message)}</p>`;
+        }
+    }
+
+    applyIntakeColumnMap() {
+        if (!this._intakeMapRows) return;
+        const { headerRow, colMap } = this.getIntakeMapFormValues();
+        if (colMap.name < 0 || colMap.qty < 0) {
+            alert('חובה לבחור עמודת שם ועמודת כמות');
+            return;
+        }
+        try {
+            const parsed = this.rowsToIntakePayloadFromMapping(this._intakeMapRows, headerRow, colMap);
+            const supplierId = document.getElementById('intake-map-supplier')?.value;
+            if (supplierId) {
+                this.saveIntakeMapForSupplier(supplierId, { headerRow, colMap });
+            }
+            this.closeIntakeMapModal();
+            this.openIntakeModal(parsed);
+        } catch (e) {
+            alert(e.message);
+        }
+    }
+
+    closeIntakeMapModal() {
+        this._intakeMapRows = null;
+        const modal = document.getElementById('intake-map-modal');
+        if (modal) modal.classList.remove('active');
+    }
+
+    parseIntakeSpreadsheet(file) {
+        return this.readSpreadsheetRows(file).then(rows => this.rowsToIntakePayload(rows));
     }
 
     normalizeIntakeCell(val) {
@@ -5466,11 +5642,14 @@ class OrderSystem {
     }
 
     rowsToIntakePayload(rows) {
-        const { headerRow, colMap } = this.detectIntakeColumns(rows);
-        if (!colMap || colMap.name < 0 || colMap.qty < 0) {
-            throw new Error('לא נמצאו עמודות שם + כמות בקובץ. הורד את התבנית (כפתור למטה) או ודא שיש עמודות: שם/תיאור + כמות');
+        const detected = this.detectIntakeColumns(rows);
+        if (!detected.colMap || detected.colMap.name < 0 || detected.colMap.qty < 0) {
+            throw new Error('לא נמצאו עמודות שם + כמות — השתמש במיפוי ידני');
         }
+        return this.rowsToIntakePayloadFromMapping(rows, detected.headerRow, detected.colMap);
+    }
 
+    rowsToIntakePayloadFromMapping(rows, headerRow, colMap) {
         let supplierName = '';
         const items = [];
         const startRow = headerRow < 0 ? 0 : headerRow + 1;
@@ -5493,7 +5672,7 @@ class OrderSystem {
             });
         }
         if (!items.length) {
-            throw new Error('לא נמצאו שורות מוצרים בקובץ — בדוק שיש שם פריט וכמות גדולה מ-0');
+            throw new Error('לא נמצאו שורות מוצרים — בדוק מיפוי עמודות ושורת כותרת');
         }
         return { supplierName, documentType: 'spreadsheet', items };
     }
