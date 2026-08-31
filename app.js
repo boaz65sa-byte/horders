@@ -5294,7 +5294,10 @@ class OrderSystem {
             }
             this.openIntakeModal(parsed);
         } catch (e) {
-            this.showAlert('שגיאה בקריאת המסמך: ' + e.message, 'info');
+            const hint = /\.(xlsx?|csv)$/i.test(file.name)
+                ? ' נסה להוריד את התבנית, או צלם את הקבלה כתמונה.'
+                : '';
+            this.showAlert('שגיאה בקריאת המסמך: ' + e.message + hint, 'info');
         }
     }
 
@@ -5337,49 +5340,161 @@ class OrderSystem {
         });
     }
 
-    rowsToIntakePayload(rows) {
-        const colMap = { sku: -1, name: -1, qty: -1, unit: -1, supplier: -1, price: -1 };
+    normalizeIntakeCell(val) {
+        return String(val ?? '')
+            .replace(/^\uFEFF/, '')
+            .replace(/[\u200e\u200f\u00a0]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    parseIntakeNumber(val) {
+        const s = this.normalizeIntakeCell(val).replace(/,/g, '.');
+        const n = parseFloat(s);
+        return Number.isFinite(n) ? n : 0;
+    }
+
+    detectIntakeColumns(rows) {
         const patterns = {
-            sku: ['מקט', 'מק״ט', 'sku', 'קוד', 'ברקוד', 'part', 'partname'],
-            name: ['שם', 'פריט', 'מוצר', 'תיאור', 'שם פריט', 'שם מוצר'],
-            qty: ['כמות', 'qty', 'quantity', 'כמות שהתקבלה', 'כמות קיימת', 'כמות להזמנה'],
-            unit: ['יחידה', 'unit', 'יח'],
-            supplier: ['ספק', 'supplier', 'שם ספק'],
-            price: ['מחיר', 'price', 'עלות', 'סכום']
+            sku: ['מק״ט', 'מקט', 'מק"ט', 'sku', 'קוד פריט', 'קוד', 'ברקוד', 'part', 'partname', 'מספר פריט'],
+            name: ['שם מוצר', 'שם פריט', 'שם הפריט', 'תיאור פריט', 'תיאור המוצר', 'תיאור', 'שם', 'פריט', 'מוצר', 'description', 'item', 'product', 'פריטים'],
+            qty: ['כמות שהתקבלה', 'כמות בפועל', 'כמות כוללת', 'כמות', 'qty', 'quantity', 'יחידות', 'כמ'],
+            unit: ['יחידת מידה', 'יחידה', 'unit', 'יח', 'מידה'],
+            supplier: ['שם ספק', 'ספק', 'supplier', 'vendor'],
+            price: ['מחיר יחידה', 'מחיר ליחידה', 'מחיר', 'price', 'עלות', 'סכום', 'תעריף']
         };
+        const colMap = { sku: -1, name: -1, qty: -1, unit: -1, supplier: -1, price: -1 };
         let headerRow = -1;
-        for (let r = 0; r < Math.min(rows.length, 8); r++) {
-            const row = (rows[r] || []).map(c => String(c).trim().toLowerCase());
-            Object.keys(patterns).forEach((key) => {
-                const idx = row.findIndex(cell => patterns[key].some(p => cell.includes(p)));
-                if (idx >= 0) colMap[key] = idx;
+        let bestScore = 0;
+
+        for (let r = 0; r < Math.min(rows.length, 30); r++) {
+            const raw = rows[r] || [];
+            const row = raw.map(c => this.normalizeIntakeCell(c).toLowerCase());
+            if (!row.some(c => c)) continue;
+
+            const trial = { sku: -1, name: -1, qty: -1, unit: -1, supplier: -1, price: -1 };
+            let score = 0;
+            row.forEach((cell, idx) => {
+                if (!cell) return;
+                Object.keys(patterns).forEach((key) => {
+                    if (trial[key] >= 0) return;
+                    const hit = patterns[key].some(p => cell === p || cell.includes(p));
+                    if (hit) {
+                        trial[key] = idx;
+                        score += key === 'name' || key === 'qty' ? 2 : 1;
+                    }
+                });
             });
-            if (colMap.name >= 0 && colMap.qty >= 0) {
+
+            if (trial.name >= 0 && trial.qty >= 0 && score > bestScore) {
+                Object.assign(colMap, trial);
                 headerRow = r;
-                break;
+                bestScore = score;
             }
         }
-        if (headerRow < 0) {
-            throw new Error('לא נמצאו עמודות שם + כמות בקובץ. צפוי: מק״ט | שם | כמות | יחידה | ספק');
+
+        if (headerRow >= 0) return { headerRow, colMap };
+
+        // תבנית ברירת מחדל: מק״ט | שם | כמות | יחידה | מחיר | ספק (6 עמודות)
+        for (let r = 0; r < Math.min(rows.length, 5); r++) {
+            const row = (rows[r] || []).map(c => this.normalizeIntakeCell(c));
+            const nonEmpty = row.filter(Boolean).length;
+            if (nonEmpty >= 3 && nonEmpty <= 8) {
+                const next = rows[r + 1] || [];
+                const nameTry = this.normalizeIntakeCell(next[1] || next[0]);
+                const qtyTry = this.parseIntakeNumber(next[2] ?? next[1]);
+                if (nameTry && /[\u0590-\u05FFa-z]/i.test(nameTry) && qtyTry > 0) {
+                    return {
+                        headerRow: r,
+                        colMap: {
+                            sku: row.length >= 6 ? 0 : -1,
+                            name: row.length >= 6 ? 1 : 0,
+                            qty: row.length >= 6 ? 2 : 1,
+                            unit: row.length >= 6 ? 3 : -1,
+                            price: row.length >= 6 ? 4 : -1,
+                            supplier: row.length >= 6 ? 5 : -1
+                        }
+                    };
+                }
+            }
         }
+
+        return this.inferIntakeColumnsFromData(rows);
+    }
+
+    inferIntakeColumnsFromData(rows) {
+        const sample = rows.slice(0, 25).filter(r => Array.isArray(r) && r.some(c => this.normalizeIntakeCell(c)));
+        if (!sample.length) return { headerRow: -1, colMap: null };
+
+        const colCount = Math.max(...sample.map(r => r.length), 0);
+        const stats = Array.from({ length: colCount }, () => ({ textScore: 0, qtyHits: 0, priceHits: 0 }));
+
+        sample.forEach((row) => {
+            row.forEach((cell, ci) => {
+                const s = this.normalizeIntakeCell(cell);
+                if (!s) return;
+                const n = this.parseIntakeNumber(s);
+                if (n > 0) {
+                    if (Number.isInteger(n) || n === Math.floor(n * 10) / 10) {
+                        if (n <= 5000) stats[ci].qtyHits++;
+                        else stats[ci].priceHits++;
+                    } else if (n < 500) stats[ci].priceHits++;
+                }
+                if (/[\u0590-\u05FFa-z]{2,}/i.test(s) && isNaN(n)) {
+                    stats[ci].textScore += s.length;
+                }
+            });
+        });
+
+        let nameCol = -1, bestText = 0;
+        let qtyCol = -1, bestQty = 0;
+        stats.forEach((st, i) => {
+            if (st.textScore > bestText) { bestText = st.textScore; nameCol = i; }
+        });
+        stats.forEach((st, i) => {
+            if (i === nameCol) return;
+            if (st.qtyHits > bestQty) { bestQty = st.qtyHits; qtyCol = i; }
+        });
+
+        if (nameCol >= 0 && qtyCol >= 0 && bestQty >= 1) {
+            return {
+                headerRow: -1,
+                colMap: { sku: -1, name: nameCol, qty: qtyCol, unit: -1, supplier: -1, price: -1 }
+            };
+        }
+        return { headerRow: -1, colMap: null };
+    }
+
+    rowsToIntakePayload(rows) {
+        const { headerRow, colMap } = this.detectIntakeColumns(rows);
+        if (!colMap || colMap.name < 0 || colMap.qty < 0) {
+            throw new Error('לא נמצאו עמודות שם + כמות בקובץ. הורד את התבנית (כפתור למטה) או ודא שיש עמודות: שם/תיאור + כמות');
+        }
+
         let supplierName = '';
         const items = [];
-        for (let r = headerRow + 1; r < rows.length; r++) {
+        const startRow = headerRow < 0 ? 0 : headerRow + 1;
+
+        for (let r = startRow; r < rows.length; r++) {
             const row = rows[r] || [];
-            const name = colMap.name >= 0 ? String(row[colMap.name] || '').trim() : '';
-            const qty = colMap.qty >= 0 ? (parseFloat(row[colMap.qty]) || 0) : 0;
+            const name = colMap.name >= 0 ? this.normalizeIntakeCell(row[colMap.name]) : '';
+            const qty = colMap.qty >= 0 ? this.parseIntakeNumber(row[colMap.qty]) : 0;
             if (!name || qty <= 0) continue;
-            const sku = colMap.sku >= 0 ? String(row[colMap.sku] || '').trim() : '';
-            const unit = colMap.unit >= 0 ? String(row[colMap.unit] || 'יחידה').trim() : 'יחידה';
-            const sup = colMap.supplier >= 0 ? String(row[colMap.supplier] || '').trim() : '';
-            const price = colMap.price >= 0 ? (parseFloat(row[colMap.price]) || 0) : 0;
+            if (/^(סה״כ|סה"כ|סך|total|סיכום|מע״מ|מע"מ)/i.test(name)) continue;
+
+            const sku = colMap.sku >= 0 ? this.normalizeIntakeCell(row[colMap.sku]) : '';
+            const unit = colMap.unit >= 0 ? this.normalizeIntakeCell(row[colMap.unit]) : 'יחידה';
+            const sup = colMap.supplier >= 0 ? this.normalizeIntakeCell(row[colMap.supplier]) : '';
+            const price = colMap.price >= 0 ? this.parseIntakeNumber(row[colMap.price]) : 0;
             if (sup && !supplierName) supplierName = sup;
             items.push({
                 sku, name, quantity: qty, unit: unit || 'יחידה',
                 supplierName: sup, price
             });
         }
-        if (!items.length) throw new Error('לא נמצאו שורות מוצרים בקובץ');
+        if (!items.length) {
+            throw new Error('לא נמצאו שורות מוצרים בקובץ — בדוק שיש שם פריט וכמות גדולה מ-0');
+        }
         return { supplierName, documentType: 'spreadsheet', items };
     }
 
