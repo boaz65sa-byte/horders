@@ -512,6 +512,7 @@ class OrderSystem {
     constructor() {
         this.suppliers = this.loadData('suppliers') || this.getDefaultSuppliers();
         this.normalizeSuppliers();
+        this.ensureGeneralWarehouseSupplier();
         this.products = this.loadData('products') || this.getDefaultProducts();
         this.normalizeProducts();
         this.history = this.loadData('history') || [];
@@ -615,6 +616,51 @@ class OrderSystem {
         });
     }
 
+    ensureGeneralWarehouseSupplier() {
+        this.normalizeSuppliers();
+        let s = this.suppliers.find(x => x.id === '__warehouse_general__' || x.isGeneralWarehouse);
+        if (!s) {
+            s = {
+                id: '__warehouse_general__',
+                name: 'מחסן כללי',
+                phone: '', email: '', category: 'מחסן',
+                agentPhone: '', prioritySupname: '',
+                isGeneralWarehouse: true
+            };
+            this.suppliers.push(s);
+            this.saveData('suppliers', this.suppliers);
+        }
+        return s;
+    }
+
+    isIntakeOnceMode(supplierId) {
+        return supplierId === '__warehouse_general_once__';
+    }
+
+    resolveIntakeTarget(supplierId) {
+        if (this.isIntakeOnceMode(supplierId)) {
+            return { mode: 'once', supplierId: null };
+        }
+        if (supplierId === '__warehouse_general__') {
+            this.ensureGeneralWarehouseSupplier();
+            return { mode: 'general', supplierId: '__warehouse_general__' };
+        }
+        return { mode: 'supplier', supplierId };
+    }
+
+    buildIntakeSupplierSelectHtml() {
+        this.ensureGeneralWarehouseSupplier();
+        const special = `
+            <option value="__warehouse_general__">🏭 מחסן כללי</option>
+            <option value="__warehouse_general_once__">📦 מחסן כללי חד-פעמי</option>
+            <option disabled>──────────</option>
+        `;
+        const regular = this.suppliers
+            .filter(s => s.id !== '__warehouse_general__')
+            .map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+        return special + regular;
+    }
+
     getDefaultSuppliers() {
         return [
             { id: '1', name: 'ירקות ופירות', phone: '052-1234567', email: 'veggies@example.com', category: 'ירקות' },
@@ -712,6 +758,7 @@ class OrderSystem {
     // Re-render all views after adopting shared data
     rerenderAll() {
         this.normalizeSuppliers();
+        this.ensureGeneralWarehouseSupplier();
         this.loadSupplierSelects();
         this.loadSuppliersDisplay();
         this.renderAllProducts();
@@ -5025,6 +5072,12 @@ class OrderSystem {
         const raw = String(supplierName || '').trim();
         if (!raw) return null;
         const low = raw.toLowerCase();
+        if (/מחסן\s*כללי|^(כללי)$/i.test(raw) || low.includes('general warehouse')) {
+            return this.ensureGeneralWarehouseSupplier();
+        }
+        if (/חד[\s-]*פעמ/i.test(raw)) {
+            return { id: '__warehouse_general_once__', name: 'מחסן כללי חד-פעמי' };
+        }
         return this.suppliers.find(s =>
             s.name.toLowerCase() === low ||
             String(s.prioritySupname || '').toLowerCase() === low ||
@@ -5056,30 +5109,41 @@ class OrderSystem {
         return null;
     }
 
-    prepareIntakeLines(parsed) {
-        const supplier = this.resolveIntakeSupplier(parsed.supplierName);
-        const supplierId = supplier ? supplier.id : '';
+    prepareIntakeLines(parsed, selectedSupplierId) {
+        let supplierId = selectedSupplierId;
+        if (!supplierId) {
+            const supplier = this.resolveIntakeSupplier(parsed.supplierName);
+            supplierId = supplier ? supplier.id : '';
+        }
+        const target = this.resolveIntakeTarget(supplierId);
+        const isOnce = target.mode === 'once';
+        const matchScope = isOnce ? null : (target.supplierId || '');
+
         return (parsed.items || []).map((line) => {
-            const product = this.findProductForIntake(line, supplierId);
+            const product = this.findProductForIntake(line, matchScope);
+            let status = product ? 'matched' : 'new';
+            if (isOnce && !product) status = 'skip';
             return {
                 sku: line.sku || '',
                 name: line.name,
                 quantity: line.quantity,
                 unit: line.unit || 'יחידה',
                 productId: product ? product.id : '',
-                status: product ? 'matched' : 'new'
+                status
             };
         });
     }
 
     openIntakeModal(parsed) {
+        this.ensureGeneralWarehouseSupplier();
         const supplier = this.resolveIntakeSupplier(parsed.supplierName);
         this._intakeDraft = {
             supplierName: parsed.supplierName || (supplier && supplier.name) || '',
             supplierId: supplier ? supplier.id : '',
             documentType: parsed.documentType || '',
-            lines: this.prepareIntakeLines(parsed)
+            lines: []
         };
+        this._intakeDraft.lines = this.prepareIntakeLines(parsed, this._intakeDraft.supplierId);
 
         const info = document.getElementById('intake-doc-info');
         if (info) {
@@ -5090,17 +5154,17 @@ class OrderSystem {
 
         const sel = document.getElementById('intake-supplier-select');
         if (sel) {
-            sel.innerHTML = '<option value="">-- בחר ספק --</option>' +
-                this.suppliers.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+            sel.innerHTML = '<option value="">-- בחר ספק / מחסן --</option>' +
+                this.buildIntakeSupplierSelectHtml();
             sel.value = this._intakeDraft.supplierId || '';
             sel.onchange = () => {
                 this._intakeDraft.supplierId = sel.value;
                 this._intakeDraft.lines = this.prepareIntakeLines({
-                    supplierName: this.suppliers.find(s => s.id === sel.value)?.name || '',
+                    supplierName: '',
                     items: this._intakeDraft.lines.map(l => ({
                         sku: l.sku, name: l.name, quantity: l.quantity, unit: l.unit
                     }))
-                });
+                }, sel.value);
                 this.renderIntakePreview();
             };
         }
@@ -5113,34 +5177,56 @@ class OrderSystem {
         const container = document.getElementById('intake-lines');
         const summary = document.getElementById('intake-summary');
         if (!container || !this._intakeDraft) return;
+        const isOnce = this.isIntakeOnceMode(this._intakeDraft.supplierId);
+        const isGeneral = this._intakeDraft.supplierId === '__warehouse_general__';
         const matched = this._intakeDraft.lines.filter(l => l.status === 'matched').length;
         const fresh = this._intakeDraft.lines.filter(l => l.status === 'new').length;
+        const skipped = this._intakeDraft.lines.filter(l => l.status === 'skip').length;
+        const statusLabel = (l) => {
+            if (l.status === 'matched') return '✅ קיים';
+            if (l.status === 'skip') return '⏭️ לא יקלט';
+            if (isGeneral) return '🆕 חדש במחסן כללי';
+            return '🆕 חדש';
+        };
+        const rowClass = (l) => {
+            if (l.status === 'skip') return 'intake-miss';
+            if (l.status === 'new') return 'intake-new';
+            return '';
+        };
         container.innerHTML = `
             <div class="intake-row intake-row-head">
                 <span>פריט</span><span>מק״ט</span><span>כמות</span><span>סטטוס</span>
             </div>
         ` + this._intakeDraft.lines.map((l, i) => `
-            <div class="intake-row ${l.status === 'new' ? 'intake-new' : ''}">
+            <div class="intake-row ${rowClass(l)}">
                 <span>${this.escapeHtml(l.name)}</span>
                 <span class="intake-sku">${this.escapeHtml(l.sku || '—')}</span>
                 <input type="number" class="input-field intake-qty-input" data-idx="${i}" min="0" step="0.5" value="${l.quantity}" style="margin:0;padding:6px;">
-                <span class="intake-status">${l.status === 'matched' ? '✅ קיים' : '🆕 חדש'}</span>
+                <span class="intake-status">${statusLabel(l)}</span>
             </div>
         `).join('');
         if (summary) {
-            summary.textContent = `${matched} פריטים קיימים יתווספו למלאי · ${fresh} פריטים חדשים ייווצרו בבנק`;
+            if (isOnce) {
+                summary.textContent = `${matched} פריטים קיימים יתווספו למלאי · ${skipped} לא יקלטו (חד-פעמי — רק פריטים שכבר בבנק)`;
+            } else if (isGeneral) {
+                summary.textContent = `${matched} פריטים קיימים יתווספו למלאי · ${fresh} פריטים חדשים ייווצרו במחסן הכללי`;
+            } else {
+                summary.textContent = `${matched} פריטים קיימים יתווספו למלאי · ${fresh} פריטים חדשים ייווצרו בבנק`;
+            }
         }
     }
 
     confirmIntake() {
         if (!this._intakeDraft) return;
-        const supplierId = document.getElementById('intake-supplier-select')?.value || this._intakeDraft.supplierId;
-        if (!supplierId) {
-            alert('נא לבחור ספק לפני קליטה');
+        const rawSupplierId = document.getElementById('intake-supplier-select')?.value || this._intakeDraft.supplierId;
+        if (!rawSupplierId) {
+            alert('נא לבחור ספק או מחסן לפני קליטה');
             return;
         }
-        const supplier = this.suppliers.find(s => s.id === supplierId);
-        if (!supplier) return;
+        const target = this.resolveIntakeTarget(rawSupplierId);
+        const isOnce = target.mode === 'once';
+        const supplierId = target.supplierId;
+        if (target.mode === 'supplier' && !this.suppliers.find(s => s.id === supplierId)) return;
 
         document.querySelectorAll('.intake-qty-input').forEach(inp => {
             const idx = parseInt(inp.dataset.idx, 10);
@@ -5151,12 +5237,21 @@ class OrderSystem {
 
         let stockUpdated = 0;
         let created = 0;
+        let skipped = 0;
         this._intakeDraft.lines.forEach((line) => {
             if (line.quantity <= 0) return;
+            if (isOnce && line.status === 'skip') {
+                skipped++;
+                return;
+            }
             let product = line.productId ? this.products.find(p => p.id === line.productId) : null;
-            if (!product) product = this.findProductForIntake(line, supplierId);
+            if (!product) product = this.findProductForIntake(line, isOnce ? null : supplierId);
 
             if (!product) {
+                if (isOnce) {
+                    skipped++;
+                    return;
+                }
                 product = {
                     id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
                     supplierId,
@@ -5184,13 +5279,16 @@ class OrderSystem {
         this.renderDashboard();
 
         const invSel = document.getElementById('inventory-supplier-select');
-        if (invSel) {
+        if (invSel && supplierId) {
             invSel.value = supplierId;
             this.renderInventory(supplierId);
             document.getElementById('inventory-controls').style.display = 'block';
         }
 
-        this.showAlert(`📥 קליטה הושלמה: ${stockUpdated} פריטים למלאי${created ? ` (${created} חדשים בבנק)` : ''}`, 'success');
+        let msg = `📥 קליטה הושלמה: ${stockUpdated} פריטים למלאי`;
+        if (created) msg += ` (${created} חדשים בבנק)`;
+        if (skipped) msg += ` · ${skipped} דולגו`;
+        this.showAlert(msg, 'success');
     }
 
     closeIntakeModal() {
