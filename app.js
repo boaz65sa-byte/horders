@@ -996,6 +996,10 @@ class OrderSystem {
         // Products tab
         const addProductBtn = document.getElementById('add-product-btn');
         if (addProductBtn) addProductBtn.addEventListener('click', () => this.addProduct());
+        const productsSearch = document.getElementById('products-search');
+        if (productsSearch) productsSearch.addEventListener('input', (e) => this.renderAllProducts());
+        const productsFilterSupplier = document.getElementById('products-filter-supplier');
+        if (productsFilterSupplier) productsFilterSupplier.addEventListener('change', () => this.renderAllProducts());
         const scanProductBtn = document.getElementById('scan-product-btn');
         if (scanProductBtn) scanProductBtn.addEventListener('click', () => this.startScanNewProduct());
 
@@ -1135,8 +1139,11 @@ class OrderSystem {
             this.refreshPendingFromServer(); // pull latest pending orders from other devices
         }
         if (tabName === 'products') {
+            this.loadSupplierSelects();
             this.renderAllProducts();
             this.renderRecentlyAdded();
+            const ps = document.getElementById('products-search');
+            if (ps) setTimeout(() => ps.focus(), 100);
         }
         if (tabName === 'inventory') {
             this.loadSupplierSelects(); // keep the inventory supplier list in sync
@@ -1394,13 +1401,15 @@ class OrderSystem {
             document.getElementById('supplier-select'),
             document.getElementById('product-supplier-select'),
             document.getElementById('excel-supplier-select'),
-            document.getElementById('inventory-supplier-select')
+            document.getElementById('inventory-supplier-select'),
+            document.getElementById('products-filter-supplier')
         ];
 
         selects.forEach(select => {
             if (!select) return;
-            const prev = select.value; // preserve the current selection across a rebuild
-            select.innerHTML = '<option value="">-- בחר ספק --</option>';
+            const prev = select.value;
+            const emptyLabel = select.id === 'products-filter-supplier' ? 'כל הספקים' : '-- בחר ספק --';
+            select.innerHTML = `<option value="">${emptyLabel}</option>`;
             this.suppliers.forEach(supplier => {
                 const option = document.createElement('option');
                 option.value = supplier.id;
@@ -1675,60 +1684,58 @@ class OrderSystem {
 
     renderAllProducts() {
         const container = document.getElementById('all-products-list');
+        const summaryEl = document.getElementById('products-list-summary');
         if (!container) return;
 
-        container.innerHTML = '';
+        const search = (document.getElementById('products-search')?.value || '').trim().toLowerCase();
+        const filterSup = document.getElementById('products-filter-supplier')?.value || '';
 
-        if (this.products.length === 0) {
-            container.innerHTML = '<p class="alert alert-info">אין מוצרים במערכת</p>';
+        const supName = {};
+        this.suppliers.forEach(s => { supName[s.id] = s.name; });
+
+        if (!search && !filterSup) {
+            container.innerHTML = '';
+            if (summaryEl) {
+                summaryEl.textContent = `📦 ${this.products.length} מוצרים במערכת — הקלד בשדה החיפוש או בחר ספק מהרשימה`;
+            }
             return;
         }
 
-        // Group products by supplier
-        this.suppliers.forEach(supplier => {
-            const supplierProducts = this.products.filter(p => p.supplierId === supplier.id);
-            if (supplierProducts.length === 0) return;
-
-            const group = document.createElement('div');
-            group.className = 'product-group';
-
-            let html = `<h4 class="product-group-title">${supplier.name} <span class="product-group-count">(${supplierProducts.length})</span></h4>`;
-            supplierProducts.forEach(product => {
-                html += `
-                    <div class="managed-product">
-                        <span class="managed-product-thumb ${product.image ? 'has-img' : ''}" onclick="orderSystem.openImagePicker('${product.id}')" ${product.image ? `style="background-image:url('${product.image}')"` : ''} title="${product.image ? 'החלף תמונה' : 'הוסף תמונה'}">${product.image ? '' : '📷'}</span>
-                        <span class="managed-product-name">${product.name}</span>
-                        <span class="managed-product-price">₪${Number(product.price).toFixed(2)} / ${product.unit}</span>
-                        <button class="btn btn-primary btn-small" onclick="orderSystem.editProduct('${product.id}')">✏️</button>
-                        <button class="btn btn-secondary btn-small" onclick="orderSystem.deleteProduct('${product.id}')">🗑️</button>
-                    </div>
-                `;
-            });
-
-            group.innerHTML = html;
-            container.appendChild(group);
+        let list = this.products.slice();
+        if (filterSup) list = list.filter(p => p.supplierId === filterSup);
+        if (search) {
+            list = list.filter(p =>
+                p.name.toLowerCase().includes(search) ||
+                String(p.sku || '').toLowerCase().includes(search) ||
+                String(p.priorityPartName || '').toLowerCase().includes(search)
+            );
+        }
+        list.sort((a, b) => {
+            const sa = supName[a.supplierId] || '';
+            const sb = supName[b.supplierId] || '';
+            return sa.localeCompare(sb, 'he') || a.name.localeCompare(b.name, 'he');
         });
 
-        // Products belonging to a deleted/unknown supplier
-        const orphanProducts = this.products.filter(p => !this.suppliers.some(s => s.id === p.supplierId));
-        if (orphanProducts.length > 0) {
-            const group = document.createElement('div');
-            group.className = 'product-group';
-            let html = `<h4 class="product-group-title">ללא ספק <span class="product-group-count">(${orphanProducts.length})</span></h4>`;
-            orphanProducts.forEach(product => {
-                html += `
-                    <div class="managed-product">
-                        <span class="managed-product-thumb ${product.image ? 'has-img' : ''}" onclick="orderSystem.openImagePicker('${product.id}')" ${product.image ? `style="background-image:url('${product.image}')"` : ''} title="${product.image ? 'החלף תמונה' : 'הוסף תמונה'}">${product.image ? '' : '📷'}</span>
-                        <span class="managed-product-name">${product.name}</span>
-                        <span class="managed-product-price">₪${Number(product.price).toFixed(2)} / ${product.unit}</span>
-                        <button class="btn btn-primary btn-small" onclick="orderSystem.editProduct('${product.id}')">✏️</button>
-                        <button class="btn btn-secondary btn-small" onclick="orderSystem.deleteProduct('${product.id}')">🗑️</button>
-                    </div>
-                `;
-            });
-            group.innerHTML = html;
-            container.appendChild(group);
+        if (summaryEl) {
+            summaryEl.textContent = `מציג ${list.length} מתוך ${this.products.length} מוצרים`;
         }
+
+        if (list.length === 0) {
+            container.innerHTML = '<p class="alert alert-info">לא נמצאו מוצרים — נסה חיפוש אחר או ספק אחר</p>';
+            return;
+        }
+
+        const showSupplier = !filterSup || search;
+        container.innerHTML = list.map(product => `
+            <div class="managed-product">
+                <span class="managed-product-thumb ${product.image ? 'has-img' : ''}" onclick="orderSystem.openImagePicker('${product.id}')" ${product.image ? `style="background-image:url('${product.image}')"` : ''} title="${product.image ? 'החלף תמונה' : 'הוסף תמונה'}">${product.image ? '' : '📷'}</span>
+                <span class="managed-product-name">${this.escapeHtml(product.name)}</span>
+                ${showSupplier ? `<span class="managed-product-supplier">${this.escapeHtml(supName[product.supplierId] || 'ללא ספק')}</span>` : ''}
+                <span class="managed-product-price">₪${Number(product.price).toFixed(2)} / ${this.escapeHtml(product.unit || '')}</span>
+                <button class="btn btn-primary btn-small" onclick="orderSystem.editProduct('${product.id}')">✏️</button>
+                <button class="btn btn-secondary btn-small" onclick="orderSystem.deleteProduct('${product.id}')">🗑️</button>
+            </div>
+        `).join('');
     }
 
     deleteProduct(productId) {
@@ -6036,6 +6043,8 @@ class OrderSystem {
         const viewSupplierId = firstCatalogSupplierId || this.resolveLineSupplierId({}, rawSupplierId);
         if (viewSupplierId) {
             this.switchTab('products');
+            const filterSel = document.getElementById('products-filter-supplier');
+            if (filterSel) filterSel.value = viewSupplierId;
             const prodSel = document.getElementById('product-supplier-select');
             if (prodSel) prodSel.value = viewSupplierId;
             this.renderAllProducts();

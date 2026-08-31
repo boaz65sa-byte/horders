@@ -868,7 +868,43 @@ label {
     padding: 6px 12px;
 }
 
-/* Products management list (grouped by supplier) */
+.products-search-panel { margin-bottom: 16px; }
+.products-search-bar {
+    display: grid;
+    grid-template-columns: 1fr minmax(140px, 200px);
+    gap: 10px;
+    margin-bottom: 8px;
+}
+.products-list-summary { font-weight: 600; margin: 8px 0; min-height: 1.2em; }
+.products-filtered-list { max-height: 55vh; overflow-y: auto; }
+.products-tools-details, .products-recent-details {
+    margin: 14px 0;
+    border: 1px solid #e0e0e0;
+    border-radius: 10px;
+    padding: 0 12px 12px;
+    background: #fafafa;
+}
+.products-tools-details summary, .products-recent-details summary {
+    cursor: pointer;
+    font-weight: 700;
+    padding: 12px 4px;
+    color: #444;
+}
+.products-tools-inner { padding-top: 8px; }
+.products-admin-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.managed-product-supplier {
+    font-size: 11px;
+    color: #888;
+    background: #eee;
+    padding: 2px 8px;
+    border-radius: 10px;
+    white-space: nowrap;
+}
+@media (max-width: 600px) {
+    .products-search-bar { grid-template-columns: 1fr; }
+}
+
+/* Products management list */
 .product-group {
     margin-bottom: 20px;
 }

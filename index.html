@@ -218,75 +218,73 @@
         <div class="tab-content" id="products-tab">
             <div class="section">
                 <h2>📦 ניהול מוצרים</h2>
-                
-                <!-- Excel Import Section -->
-                <div class="excel-import-section">
-                    <h3>📂 ייבוא מוצרים מאקסל</h3>
-                    <p class="help-text">העלה קובץ Excel/CSV עם המוצרים. הפורמט: שם מוצר | מחיר | יחידה</p>
-                    
-                    <label for="excel-supplier-select">בחר ספק לייבוא:</label>
-                    <select id="excel-supplier-select" class="input-field">
-                        <option value="">-- בחר ספק --</option>
-                    </select>
 
-                    <div class="file-upload">
-                        <input type="file" id="excel-file" accept=".xlsx,.xls,.csv" class="file-input">
-                        <label for="excel-file" class="file-label">📄 בחר קובץ Excel/CSV</label>
-                        <span id="file-name" class="file-name"></span>
+                <!-- Search & list first — no scrolling through all suppliers -->
+                <div class="products-search-panel">
+                    <div class="products-search-bar">
+                        <input type="text" id="products-search" class="input-field" placeholder="🔍 חיפוש מוצר לפי שם או מק״ט..." autocomplete="off">
+                        <select id="products-filter-supplier" class="input-field">
+                            <option value="">כל הספקים</option>
+                        </select>
                     </div>
-
-                    <div id="excel-preview" class="excel-preview" style="display: none;">
-                        <h4>תצוגה מקדימה:</h4>
-                        <div id="preview-content"></div>
-                        <button id="import-products-btn" class="btn btn-primary">⬆️ ייבא מוצרים</button>
-                    </div>
+                    <p id="products-list-summary" class="help-text products-list-summary"></p>
+                    <div id="all-products-list" class="products-filtered-list"></div>
                 </div>
 
-                <hr style="margin: 30px 0;">
+                <details class="products-tools-details">
+                    <summary>➕ הוסף מוצר / 📂 ייבוא מאקסל</summary>
+                    <div class="products-tools-inner">
+                        <div class="excel-import-section">
+                            <h3>📂 ייבוא מוצרים מאקסל</h3>
+                            <p class="help-text">העלה קובץ Excel/CSV. הפורמט: שם מוצר | מחיר | יחידה</p>
+                            <label for="excel-supplier-select">בחר ספק לייבוא:</label>
+                            <select id="excel-supplier-select" class="input-field">
+                                <option value="">-- בחר ספק --</option>
+                            </select>
+                            <div class="file-upload">
+                                <input type="file" id="excel-file" accept=".xlsx,.xls,.csv" class="file-input">
+                                <label for="excel-file" class="file-label">📄 בחר קובץ Excel/CSV</label>
+                                <span id="file-name" class="file-name"></span>
+                            </div>
+                            <div id="excel-preview" class="excel-preview" style="display: none;">
+                                <h4>תצוגה מקדימה:</h4>
+                                <div id="preview-content"></div>
+                                <button id="import-products-btn" class="btn btn-primary">⬆️ ייבא מוצרים</button>
+                            </div>
+                        </div>
+                        <hr style="margin: 20px 0;">
+                        <div class="add-product-section">
+                            <h3>➕ הוסף מוצר ידנית</h3>
+                            <label for="product-supplier-select">בחר ספק:</label>
+                            <select id="product-supplier-select" class="input-field">
+                                <option value="">-- בחר ספק --</option>
+                            </select>
+                            <label for="product-name">שם המוצר:</label>
+                            <input type="text" id="product-name" class="input-field" placeholder="לדוגמה: חסה">
+                            <label for="product-price">מחיר:</label>
+                            <input type="number" id="product-price" class="input-field" placeholder="לדוגמה: 8" step="0.01">
+                            <label for="product-unit">יחידה:</label>
+                            <select id="product-unit" class="input-field">
+                                <option value="ק״ג">ק״ג</option>
+                                <option value="יחידה">יחידה</option>
+                                <option value="ארגז">ארגז</option>
+                                <option value="קרטון">קרטון</option>
+                            </select>
+                            <button id="add-product-btn" class="btn btn-primary">➕ הוסף מוצר</button>
+                            <button id="scan-product-btn" class="btn btn-primary" style="background:linear-gradient(135deg,#7E57C2,#5E35B1);">📷 צלם מוצר</button>
+                            <p class="help-text">צלם את <strong>שם המוצר על האריזה</strong> בקרוב ובתאורה טובה.</p>
+                        </div>
+                    </div>
+                </details>
 
-                <!-- Manual Add Product -->
-                <div class="add-product-section">
-                    <h3>➕ הוסף מוצר ידנית</h3>
-                    
-                    <label for="product-supplier-select">בחר ספק:</label>
-                    <select id="product-supplier-select" class="input-field">
-                        <option value="">-- בחר ספק --</option>
-                    </select>
-
-                    <label for="product-name">שם המוצר:</label>
-                    <input type="text" id="product-name" class="input-field" placeholder="לדוגמה: חסה">
-
-                    <label for="product-price">מחיר:</label>
-                    <input type="number" id="product-price" class="input-field" placeholder="לדוגמה: 8" step="0.01">
-
-                    <label for="product-unit">יחידה:</label>
-                    <select id="product-unit" class="input-field">
-                        <option value="ק״ג">ק״ג</option>
-                        <option value="יחידה">יחידה</option>
-                        <option value="ארגז">ארגז</option>
-                        <option value="קרטון">קרטון</option>
-                    </select>
-
-                    <button id="add-product-btn" class="btn btn-primary">➕ הוסף מוצר</button>
-                    <button id="scan-product-btn" class="btn btn-primary" style="background:linear-gradient(135deg,#7E57C2,#5E35B1);">📷 צלם מוצר</button>
-                    <p class="help-text">צלם את <strong>שם המוצר על האריזה</strong> בקרוב ובתאורה טובה. אחרי הצילום תבחר/תתקן את השם לפני השמירה.</p>
-                </div>
-
-                <!-- Recently Added Products -->
-                <div class="recent-products-section" id="recent-products-section">
-                    <h3>🆕 נוספו לאחרונה</h3>
-                    <p class="help-text">מוצרים שנוספו ב-30 הימים האחרונים (צילום, ידני, ייבוא)</p>
+                <details class="products-recent-details" open>
+                    <summary>🆕 נוספו לאחרונה (30 יום)</summary>
                     <div id="recent-products-list" class="recent-products-list"></div>
-                </div>
+                </details>
 
-                <hr style="margin: 30px 0;">
-
-                <!-- Products List -->
-                <div class="products-management">
-                    <h3>רשימת מוצרים</h3>
-                    <button id="seed-catalog-btn" class="btn btn-primary">🧺 הוסף קטלוג מוצרים מלא (ירקות, פירות, בשר, גבינות, ביצים)</button>
-                    <button id="autofill-images-btn" class="btn btn-primary">🖼️ מלא תמונות אוטומטית מהאינטרנט</button>
-                    <div id="all-products-list"></div>
+                <div class="products-admin-tools">
+                    <button id="seed-catalog-btn" class="btn btn-secondary">🧺 הוסף קטלוג מלא</button>
+                    <button id="autofill-images-btn" class="btn btn-secondary">🖼️ מלא תמונות מהאינטרנט</button>
                 </div>
             </div>
         </div>
