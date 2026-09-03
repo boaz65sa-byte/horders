@@ -720,6 +720,10 @@ class OrderSystem {
     // Storage
     // ===========================
 
+    sameId(a, b) {
+        return String(a ?? '') === String(b ?? '');
+    }
+
     saveData(key, data) {
         localStorage.setItem(key, JSON.stringify(data));
         // Mirror shared collections + config objects to the KV bank (only the key that changed)
@@ -734,6 +738,15 @@ class OrderSystem {
     loadData(key) {
         const data = localStorage.getItem(key);
         return data ? JSON.parse(data) : null;
+    }
+
+    /** Show products list filtered to a supplier (products tab). */
+    showProductsForSupplier(supplierId) {
+        const filterSel = document.getElementById('products-filter-supplier');
+        if (filterSel && supplierId) filterSel.value = String(supplierId);
+        const search = document.getElementById('products-search');
+        if (search) search.value = '';
+        this.renderAllProducts();
     }
 
     getBankApiKey() {
@@ -802,10 +815,31 @@ class OrderSystem {
 
             // If an order is mid-build, don't swap products/suppliers under it (would break the DOM rows)
             const orderInProgress = this.currentOrder.length > 0 || this.manualItems.length > 0;
-            // Adopt whichever shared collections the server already has (server = source of truth)
+            const toPushBack = {};
+
+            // Adopt shared collections — merge products/suppliers so local-only rows aren't wiped
             SHARED_KEYS.forEach(k => {
                 if (orderInProgress && (k === 'products' || k === 'suppliers')) return;
-                if (Array.isArray(data[k])) {
+                if (!Array.isArray(data[k])) return;
+
+                if (k === 'products' || k === 'suppliers') {
+                    const local = Array.isArray(this[k]) ? this[k] : [];
+                    const server = data[k];
+                    const byId = new Map();
+                    server.forEach(item => { if (item && item.id != null) byId.set(String(item.id), item); });
+                    const localOnly = [];
+                    local.forEach(item => {
+                        if (!item || item.id == null) return;
+                        const id = String(item.id);
+                        if (!byId.has(id)) {
+                            byId.set(id, item);
+                            localOnly.push(item);
+                        }
+                    });
+                    this[k] = Array.from(byId.values());
+                    this.saveLocal(k, this[k]);
+                    if (localOnly.length) toPushBack[k] = this[k];
+                } else {
                     this[k] = data[k];
                     this.saveLocal(k, data[k]);
                 }
@@ -823,12 +857,13 @@ class OrderSystem {
             const missing = SHARED_KEYS.filter(k => !Array.isArray(data[k]))
                 .concat(SHARED_OBJECT_KEYS.filter(k => !(data[k] && typeof data[k] === 'object' && !Array.isArray(data[k]))));
             if (missing.length) {
-                const payload = {};
-                missing.forEach(k => { payload[k] = this[k]; });
+                missing.forEach(k => { toPushBack[k] = this[k]; });
+            }
+            if (Object.keys(toPushBack).length) {
                 fetch('/api/data', {
                     method: 'POST',
                     headers: this.getApiHeaders({ 'Content-Type': 'application/json' }),
-                    body: JSON.stringify(payload)
+                    body: JSON.stringify(toPushBack)
                 }).catch(() => {});
             }
         } catch (e) {
@@ -870,14 +905,24 @@ class OrderSystem {
     // POST only the collections that actually changed — never clobber untouched keys on the server
     saveSharedBank() {
         if (!this.sharedBankActive || this._dirtyKeys.size === 0) return;
+        const keys = Array.from(this._dirtyKeys);
         const payload = {};
-        this._dirtyKeys.forEach(k => { payload[k] = this[k]; });
+        keys.forEach(k => { payload[k] = this[k]; });
         this._dirtyKeys.clear();
         fetch('/api/data', {
             method: 'POST',
             headers: this.getApiHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(payload)
-        }).catch(() => { /* ignore transient errors */ });
+        }).then(r => {
+            if (r.status === 401) {
+                this.sharedBankAuthFailed = true;
+                keys.forEach(k => this._dirtyKeys.add(k));
+                return;
+            }
+            if (!r.ok) keys.forEach(k => this._dirtyKeys.add(k));
+        }).catch(() => {
+            keys.forEach(k => this._dirtyKeys.add(k));
+        });
     }
 
     // Pull the latest pending orders from the shared bank (used when opening Approvals)
@@ -1000,6 +1045,13 @@ class OrderSystem {
         if (productsSearch) productsSearch.addEventListener('input', (e) => this.renderAllProducts());
         const productsFilterSupplier = document.getElementById('products-filter-supplier');
         if (productsFilterSupplier) productsFilterSupplier.addEventListener('change', () => this.renderAllProducts());
+        const productSupplierSelect = document.getElementById('product-supplier-select');
+        if (productSupplierSelect) {
+            productSupplierSelect.addEventListener('change', () => {
+                const sid = productSupplierSelect.value;
+                if (sid) this.showProductsForSupplier(sid);
+            });
+        }
         const scanProductBtn = document.getElementById('scan-product-btn');
         if (scanProductBtn) scanProductBtn.addEventListener('click', () => this.startScanNewProduct());
 
@@ -1546,8 +1598,8 @@ class OrderSystem {
     deleteSupplier(supplierId) {
         if (!confirm('האם אתה בטוח שברצונך למחוק את הספק?')) return;
 
-        this.suppliers = this.suppliers.filter(s => s.id !== supplierId);
-        this.products = this.products.filter(p => p.supplierId !== supplierId);
+        this.suppliers = this.suppliers.filter(s => !this.sameId(s.id, supplierId));
+        this.products = this.products.filter(p => !this.sameId(p.supplierId, supplierId));
         
         this.saveData('suppliers', this.suppliers);
         this.saveData('products', this.products);
@@ -1671,13 +1723,13 @@ class OrderSystem {
 
         this.showAlert('המוצר נוסף בהצלחה! ✅', 'success');
 
-        // Refresh the management list
-        this.renderAllProducts();
+        // Show the supplier's list immediately (don't leave filter empty — looked like "not saved")
+        this.showProductsForSupplier(supplierId);
         this.renderRecentlyAdded();
 
-        // Refresh products list if current supplier is selected
+        // Refresh order products for this supplier
         const currentSupplierId = document.getElementById('supplier-select').value;
-        if (currentSupplierId === supplierId) {
+        if (this.sameId(currentSupplierId, supplierId)) {
             this.loadProducts(supplierId);
         }
     }
@@ -1691,18 +1743,18 @@ class OrderSystem {
         const filterSup = document.getElementById('products-filter-supplier')?.value || '';
 
         const supName = {};
-        this.suppliers.forEach(s => { supName[s.id] = s.name; });
+        this.suppliers.forEach(s => { supName[String(s.id)] = s.name; });
 
         if (!search && !filterSup) {
             container.innerHTML = '';
             if (summaryEl) {
-                summaryEl.textContent = `📦 ${this.products.length} מוצרים במערכת — הקלד בשדה החיפוש או בחר ספק מהרשימה`;
+                summaryEl.textContent = `📦 ${this.products.length} מוצרים במערכת — בחר ספק מהרשימה או חפש בשם`;
             }
             return;
         }
 
         let list = this.products.slice();
-        if (filterSup) list = list.filter(p => p.supplierId === filterSup);
+        if (filterSup) list = list.filter(p => this.sameId(p.supplierId, filterSup));
         if (search) {
             list = list.filter(p =>
                 p.name.toLowerCase().includes(search) ||
@@ -1711,8 +1763,8 @@ class OrderSystem {
             );
         }
         list.sort((a, b) => {
-            const sa = supName[a.supplierId] || '';
-            const sb = supName[b.supplierId] || '';
+            const sa = supName[String(a.supplierId)] || '';
+            const sb = supName[String(b.supplierId)] || '';
             return sa.localeCompare(sb, 'he') || a.name.localeCompare(b.name, 'he');
         });
 
@@ -1721,16 +1773,16 @@ class OrderSystem {
         }
 
         if (list.length === 0) {
-            container.innerHTML = '<p class="alert alert-info">לא נמצאו מוצרים — נסה חיפוש אחר או ספק אחר</p>';
+            container.innerHTML = '<p class="alert alert-info">לא נמצאו מוצרים לספק/חיפוש הזה</p>';
             return;
         }
 
-        const showSupplier = !filterSup || search;
+        const showSupplier = !filterSup || !!search;
         container.innerHTML = list.map(product => `
             <div class="managed-product">
                 <span class="managed-product-thumb ${product.image ? 'has-img' : ''}" onclick="orderSystem.openImagePicker('${product.id}')" ${product.image ? `style="background-image:url('${product.image}')"` : ''} title="${product.image ? 'החלף תמונה' : 'הוסף תמונה'}">${product.image ? '' : '📷'}</span>
                 <span class="managed-product-name">${this.escapeHtml(product.name)}</span>
-                ${showSupplier ? `<span class="managed-product-supplier">${this.escapeHtml(supName[product.supplierId] || 'ללא ספק')}</span>` : ''}
+                ${showSupplier ? `<span class="managed-product-supplier">${this.escapeHtml(supName[String(product.supplierId)] || 'ללא ספק')}</span>` : ''}
                 <span class="managed-product-price">₪${Number(product.price).toFixed(2)} / ${this.escapeHtml(product.unit || '')}</span>
                 <button class="btn btn-primary btn-small" onclick="orderSystem.editProduct('${product.id}')">✏️</button>
                 <button class="btn btn-secondary btn-small" onclick="orderSystem.deleteProduct('${product.id}')">🗑️</button>
@@ -1829,7 +1881,7 @@ class OrderSystem {
         }
 
         const isAdmin = typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.role === 'admin';
-        const products = this.products.filter(p => p.supplierId === supplierId);
+        const products = this.products.filter(p => this.sameId(p.supplierId, supplierId));
 
         if (controls) controls.style.display = products.length ? 'block' : 'none';
 
@@ -1914,7 +1966,7 @@ class OrderSystem {
         const el = document.getElementById('inventory-shortage-summary');
         if (!el) return;
         let shortItems = 0;
-        this.products.filter(p => p.supplierId === supplierId).forEach(product => {
+        this.products.filter(p => this.sameId(p.supplierId, supplierId)).forEach(product => {
             const stockInput = document.querySelector(`.inv-stock[data-product-id="${product.id}"]`);
             const parInput = document.querySelector(`.inv-par[data-product-id="${product.id}"]`);
             const stock = stockInput ? (parseFloat(stockInput.value) || 0) : (Number(product.stockQty) || 0);
@@ -1948,7 +2000,7 @@ class OrderSystem {
         const reportedBy = (typeof authSystem !== 'undefined' && authSystem.currentUser && authSystem.currentUser.name) ? authSystem.currentUser.name : '';
         let reported = 0;
         this.products
-            .filter(p => p.supplierId === supplierId && this.productShortage(p) > 0)
+            .filter(p => this.sameId(p.supplierId, supplierId) && this.productShortage(p) > 0)
             .forEach(p => {
                 const shortage = this.productShortage(p);
                 const existing = this.needs.find(n => n.productId === p.id);
@@ -2258,7 +2310,7 @@ class OrderSystem {
         this.saveInventory();
 
         const shortages = this.products
-            .filter(p => p.supplierId === supplierId)
+            .filter(p => this.sameId(p.supplierId, supplierId))
             .map(p => ({ id: p.id, shortage: this.productShortage(p) }))
             .filter(x => x.shortage > 0);
 
@@ -2803,9 +2855,10 @@ class OrderSystem {
         // Clear everything
         this.clearExcelPreview();
         
-        // Refresh products list
-        this.renderAllProducts();
+        this.showProductsForSupplier(supplierId);
         this.renderRecentlyAdded();
+        const orderSid = document.getElementById('supplier-select')?.value;
+        if (this.sameId(orderSid, supplierId)) this.loadProducts(supplierId);
 
         this.showAlert(`✅ יובאו ${count} מוצרים בהצלחה!`, 'success');
     }
@@ -2965,7 +3018,7 @@ class OrderSystem {
                 this.manualItems.push({ name: it.product, quantity: it.quantity, unit: it.unit, price: it.price || 0 });
                 return;
             }
-            const prod = this.products.find(p => p.supplierId === supplierId && p.name === it.product);
+            const prod = this.products.find(p => this.sameId(p.supplierId, supplierId) && p.name === it.product);
             if (prod) {
                 this.addProductToCart(prod.id, it.quantity, it.unit);
             } else {
@@ -3057,7 +3110,7 @@ class OrderSystem {
 
     loadProducts(supplierId) {
         const container = document.getElementById('products-list');
-        const products = this.products.filter(p => p.supplierId === supplierId);
+        const products = this.products.filter(p => this.sameId(p.supplierId, supplierId));
 
         if (products.length === 0) {
             container.innerHTML = '<p class="alert alert-info">אין מוצרים לספק זה. הוסף מוצרים בטאב "מוצרים"</p>';
@@ -3454,7 +3507,7 @@ class OrderSystem {
 
         const norm = (value) => String(value || '').trim().toLowerCase();
         const existing = this.products.find(
-            (p) => p.supplierId === supplierId && norm(p.name) === norm(name)
+            (p) => this.sameId(p.supplierId, supplierId) && norm(p.name) === norm(name)
         );
 
         if (existing) {
@@ -3503,10 +3556,10 @@ class OrderSystem {
             }
         }
 
-        this.renderAllProducts();
+        this.showProductsForSupplier(supplierId);
         this.renderRecentlyAdded();
         const currentSupplierId = document.getElementById('supplier-select')?.value;
-        if (currentSupplierId === supplierId) this.loadProducts(supplierId);
+        if (this.sameId(currentSupplierId, supplierId)) this.loadProducts(supplierId);
         return true;
     }
 
@@ -5736,14 +5789,14 @@ class OrderSystem {
             sku && (p.sku === sku || p.priorityPartName === sku || p.id === sku);
         if (sku) {
             if (supplierId) {
-                const p = this.products.find(p => p.supplierId === supplierId && matchSku(p));
+                const p = this.products.find(p => this.sameId(p.supplierId, supplierId) && matchSku(p));
                 if (p) return p;
             }
             const p = this.products.find(matchSku);
             if (p) return p;
         }
         if (name && supplierId) {
-            const p = this.products.find(p => p.supplierId === supplierId && p.name.toLowerCase() === name);
+            const p = this.products.find(p => this.sameId(p.supplierId, supplierId) && p.name.toLowerCase() === name);
             if (p) return p;
         }
         if (name) {
@@ -6043,11 +6096,9 @@ class OrderSystem {
         const viewSupplierId = firstCatalogSupplierId || this.resolveLineSupplierId({}, rawSupplierId);
         if (viewSupplierId) {
             this.switchTab('products');
-            const filterSel = document.getElementById('products-filter-supplier');
-            if (filterSel) filterSel.value = viewSupplierId;
             const prodSel = document.getElementById('product-supplier-select');
             if (prodSel) prodSel.value = viewSupplierId;
-            this.renderAllProducts();
+            this.showProductsForSupplier(viewSupplierId);
         }
 
         const invSel = document.getElementById('inventory-supplier-select');
@@ -6055,6 +6106,11 @@ class OrderSystem {
             invSel.value = viewSupplierId;
             this.renderInventory(viewSupplierId);
             document.getElementById('inventory-controls').style.display = 'block';
+        }
+
+        const orderSid = document.getElementById('supplier-select')?.value;
+        if (orderSid && this.sameId(orderSid, viewSupplierId)) {
+            this.loadProducts(orderSid);
         }
 
         let msg = `📥 קליטה הושלמה: ${stockUpdated} למלאי`;
